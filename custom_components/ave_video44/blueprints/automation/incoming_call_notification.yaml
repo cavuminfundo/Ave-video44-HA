@@ -1,0 +1,115 @@
+blueprint:
+  name: "Notifica Chiamata Videocitofono AVE Video V44"
+  description: "Invia notifiche interattive ad alta priorita all'app Home Assistant Companion con pulsanti di risposta rapida, apertura cancello e annuncio vocale TTS opzionale."
+  domain: automation
+  input:
+    doorbell_device:
+      name: "Videocitofono AVE"
+      description: "Il dispositivo videocitofono o posto esterno AVE Video V44 che genera l'evento di chiamata."
+      selector:
+        device:
+          integration: ave_video44
+    notify_devices:
+      name: "Dispositivi Notifica (Smartphone Companion App)"
+      description: "Smartphone su cui inviare la notifica con opzioni rapide e deep-link."
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: true
+    camera_entity:
+      name: "Telecamera Posto Esterno (Opzionale)"
+      description: "Entita telecamera da cui catturare lo snapshot per la notifica."
+      default: ""
+      selector:
+        entity:
+          domain: camera
+    media_players:
+      name: "Smart Speaker per Annuncio TTS (Opzionale)"
+      description: "Dispositivi audio su cui riprodurre l'annuncio vocale di chiamata in arrivo."
+      default: []
+      selector:
+        target:
+          entity:
+            domain: media_player
+    tts_engine:
+      name: "Motore TTS"
+      description: "Servizio di sintesi vocale da utilizzare per gli annunci."
+      default: tts.piper
+      selector:
+        entity:
+          domain: tts
+    tts_message:
+      name: "Messaggio Vocale TTS"
+      description: "Testo dell'annuncio vocale per gli altoparlanti."
+      default: "Chiamata in arrivo dal videocitofono principale."
+      selector:
+        text:
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  doorbell_device: !input doorbell_device
+  camera_entity: !input camera_entity
+  media_players: !input media_players
+  tts_engine: !input tts_engine
+
+trigger:
+  - platform: event
+    event_type: ave_video44_incoming_call
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ doorbell_device is not defined or doorbell_device == none or doorbell_device == '' or trigger.event.data.device_id == device_attr(doorbell_device, 'identifiers') | map('last') | first or trigger.event.data.device_id == doorbell_device }}
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ camera_entity != '' }}"
+        sequence:
+          - service: camera.snapshot
+            target:
+              entity_id: !input camera_entity
+            data:
+              filename: /config/www/ave_doorbell_latest.jpg
+
+  - repeat:
+      for_each: !input notify_devices
+      sequence:
+        - service: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          continue_on_error: true
+          data:
+            title: "Citofono AVE: Chiamata in arrivo"
+            message: "Qualcuno sta suonando al videocitofono."
+            data:
+              tag: "ave_incoming_call_{{ trigger.event.data.device_id }}"
+              channel: "Doorbell"
+              importance: high
+              priority: high
+              ttl: 0
+              image: "/local/ave_doorbell_latest.jpg"
+              clickAction: "/lovelace/citofono?ave_call=answer&device_id={{ trigger.event.data.device_id }}"
+              actions:
+                - action: "URI"
+                  title: "Rispondi"
+                  uri: "/lovelace/citofono?ave_call=answer&device_id={{ trigger.event.data.device_id }}"
+                - action: "REJECT_CALL"
+                  title: "Rifiuta"
+                - action: "OPEN_GATE"
+                  title: "Apri Cancello"
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ media_players | length > 0 }}"
+        sequence:
+          - service: tts.speak
+            target:
+              entity_id: "{{ tts_engine }}"
+            data:
+              media_player_entity_id: !input media_players
+              message: !input tts_message
+            continue_on_error: true

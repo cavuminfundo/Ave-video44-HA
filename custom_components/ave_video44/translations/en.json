@@ -1,0 +1,117 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "AVE Cloud Authentication",
+        "description": "Select the login method for your AVE Video V44 system.",
+        "data": {
+          "auth_method": "Authentication Method"
+        }
+      },
+      "password": {
+        "title": "Login with Password",
+        "description": "Enter your AVE Cloud credentials.",
+        "data": {
+          "account": "Email or Username",
+          "password": "Password"
+        }
+      },
+      "otp_request": {
+        "title": "Request OTP Code",
+        "description": "Enter your email address to receive a one-time OTP code.",
+        "data": {
+          "account": "Email"
+        }
+      },
+      "otp_verify": {
+        "title": "Verify OTP Code",
+        "description": "Enter the 6-digit OTP code received via email.",
+        "data": {
+          "otp": "OTP Code"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the AVE cloud server.",
+      "invalid_auth": "Invalid credentials or expired OTP code.",
+      "unknown": "Unexpected authentication error."
+    },
+    "abort": {
+      "already_configured": "This AVE account or home is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AVE Video V44 Options",
+        "description": "Configure the intercom phonebook and operational settings.",
+        "data": {
+          "intercom_book": "Intercom Directory (format: code=Name, ...)",
+          "unlock_pulse_duration": "Unlock pulse duration (seconds)",
+          "preferred_video_stream": "Preferred video stream"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lock": {
+      "pedestrian": {
+        "name": "Pedestrian Lock"
+      },
+      "driveway": {
+        "name": "Driveway Gate"
+      }
+    },
+    "button": {
+      "unlock_1": {
+        "name": "Pedestrian Unlock"
+      },
+      "unlock_2": {
+        "name": "Gate Unlock"
+      },
+      "call": {
+        "name": "Call Intercom"
+      },
+      "answer": {
+        "name": "Answer"
+      },
+      "hangup": {
+        "name": "Hangup"
+      }
+    },
+    "binary_sensor": {
+      "incoming_call": {
+        "name": "Incoming Call"
+      },
+      "connectivity": {
+        "name": "Connectivity"
+      }
+    },
+    "event": {
+      "doorbell": {
+        "name": "Doorbell"
+      }
+    },
+    "sensor": {
+      "call_status": {
+        "name": "Call Status"
+      },
+      "caller_name": {
+        "name": "Caller Name"
+      },
+      "last_call": {
+        "name": "Last Call"
+      }
+    },
+    "select": {
+      "intercom_target": {
+        "name": "Intercom Target"
+      }
+    },
+    "camera": {
+      "live_stream": {
+        "name": "Camera"
+      }
+    }
+  }
+}

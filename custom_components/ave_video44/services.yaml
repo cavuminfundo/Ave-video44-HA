@@ -1,0 +1,64 @@
+unlock:
+  name: Sblocca Serratura
+  description: Invia il comando di apertura per la serratura pedonale o il cancello carraio.
+  fields:
+    device_id:
+      name: ID Dispositivo
+      description: ID numerico o stringa del monitor o posto esterno AVE.
+      required: true
+      example: "9991"
+      selector:
+        text:
+    lock_id:
+      name: ID Serratura
+      description: 1 per serratura pedonale, 2 per cancello carraio.
+      default: "1"
+      example: "1"
+      selector:
+        select:
+          options:
+            - "1"
+            - "2"
+
+call_intercom:
+  name: Chiama Interfono
+  description: Avvia una chiamata vocale interfono verso una stanza o interno registrato.
+  fields:
+    device_id:
+      name: ID Dispositivo
+      description: ID del monitor da cui far partire la chiamata.
+      required: true
+      example: "9991"
+      selector:
+        text:
+    room_code:
+      name: Codice Stanza
+      description: Codice stanza interno dell'appartamento o posto interno (es. 1-1-102).
+      required: false
+      example: "1-1-102"
+      selector:
+        text:
+
+answer_call:
+  name: Rispondi Chiamata
+  description: Accetta la chiamata citofonica in arrivo.
+  fields:
+    device_id:
+      name: ID Dispositivo
+      description: ID del dispositivo AVE che risponde alla chiamata.
+      required: true
+      example: "9991"
+      selector:
+        text:
+
+hangup_call:
+  name: Riaggancia Chiamata
+  description: Termina o rifiuta la conversazione citofonica attiva.
+  fields:
+    device_id:
+      name: ID Dispositivo
+      description: ID del dispositivo da riagganciare.
+      required: true
+      example: "9991"
+      selector:
+        text:

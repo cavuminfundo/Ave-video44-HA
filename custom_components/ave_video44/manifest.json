@@ -1,0 +1,12 @@
+{
+  "domain": "ave_video44",
+  "name": "AVE Video V44",
+  "codeowners": ["@federico"],
+  "config_flow": true,
+  "documentation": "https://github.com/federico/Ave-video44-HA",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/federico/Ave-video44-HA/issues",
+  "requirements": ["paho-mqtt>=2.0.0"],
+  "version": "1.0.0"
+}

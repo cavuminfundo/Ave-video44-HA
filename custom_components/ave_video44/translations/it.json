@@ -1,0 +1,117 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Autenticazione AVE Cloud",
+        "description": "Seleziona la modalità di accesso per il sistema AVE Video V44.",
+        "data": {
+          "auth_method": "Metodo di Autenticazione"
+        }
+      },
+      "password": {
+        "title": "Accesso con Password",
+        "description": "Inserisci le credenziali del tuo account AVE Cloud.",
+        "data": {
+          "account": "Email o Username",
+          "password": "Password"
+        }
+      },
+      "otp_request": {
+        "title": "Richiesta Codice OTP",
+        "description": "Inserisci la tua email per ricevere il codice monouso OTP.",
+        "data": {
+          "account": "Email"
+        }
+      },
+      "otp_verify": {
+        "title": "Verifica Codice OTP",
+        "description": "Inserisci il codice a 6 cifre ricevuto via email.",
+        "data": {
+          "otp": "Codice OTP"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile connettersi al server cloud AVE.",
+      "invalid_auth": "Credenziali non valide o codice OTP errato/scaduto.",
+      "unknown": "Errore imprevisto durante l'autenticazione."
+    },
+    "abort": {
+      "already_configured": "Questo account AVE o abitazione è già configurato."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opzioni AVE Video V44",
+        "description": "Configura la rubrica interfono e i parametri operativi.",
+        "data": {
+          "intercom_book": "Rubrica Interni (formato: codice=Nome, ...)",
+          "unlock_pulse_duration": "Durata impulso apertura (secondi)",
+          "preferred_video_stream": "Flusso video preferito"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lock": {
+      "pedestrian": {
+        "name": "Serratura Pedonale"
+      },
+      "driveway": {
+        "name": "Cancello Carraio"
+      }
+    },
+    "button": {
+      "unlock_1": {
+        "name": "Apriporta Pedonale"
+      },
+      "unlock_2": {
+        "name": "Apriporta Carraio"
+      },
+      "call": {
+        "name": "Chiama Interfono"
+      },
+      "answer": {
+        "name": "Rispondi"
+      },
+      "hangup": {
+        "name": "Riaggancia"
+      }
+    },
+    "binary_sensor": {
+      "incoming_call": {
+        "name": "Chiamata in Arrivo"
+      },
+      "connectivity": {
+        "name": "Connessione"
+      }
+    },
+    "event": {
+      "doorbell": {
+        "name": "Campanello"
+      }
+    },
+    "sensor": {
+      "call_status": {
+        "name": "Stato Chiamata"
+      },
+      "caller_name": {
+        "name": "Chiamante"
+      },
+      "last_call": {
+        "name": "Ultima Chiamata"
+      }
+    },
+    "select": {
+      "intercom_target": {
+        "name": "Destinazione Interfono"
+      }
+    },
+    "camera": {
+      "live_stream": {
+        "name": "Telecamera"
+      }
+    }
+  }
+}
