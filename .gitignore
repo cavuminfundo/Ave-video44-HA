@@ -1,0 +1,6 @@
+scratch/
+*.apk
+*.xapk
+*.dex
+.env
+__pycache__/
