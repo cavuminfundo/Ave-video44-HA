@@ -3,10 +3,22 @@
 [![HACS Custom Component](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/default)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cavuminfundo&repository=Ave-video44-HA&category=integration)
 
 Integrazione Home Assistant per videocitofoni AVE Video V44 (dispositivi serie VI2F-PIT7WF, TS-SMART e compatibili protocollo GVS). Supporta video streaming live H.264/RTSP, sblocco serrature pedonali e carraie, gestione eventi di chiamata in arrivo, interfono bidirezionale multi-appartamento (HOUSETOHOUSE), card Lovelace integrata con audio full-duplex WebAudio (cancellazione eco e ricampionamento 8kHz PCM16) e Blueprint per notifiche Companion App con deep-link.
 
 Home Assistant custom integration for AVE Video V44 video intercom systems (VI2F-PIT7WF, TS-SMART, and GVS-compatible units). Features live H.264/RTSP streaming, dual-lock control, incoming call events, inter-apartment intercom (HOUSETOHOUSE), a bundled Lovelace card with full-duplex WebAudio (hardware echo cancellation, 8kHz PCM16 resampling), and automated Companion App notification blueprints with interactive deep-linking.
+
+---
+
+## Repository Documentation Index
+
+- [.agents/AGENTS.md](.agents/AGENTS.md)
+- [.agents/memory/lessons.md](.agents/memory/lessons.md)
+- [docs/architecture.md](docs/architecture.md)
+- [docs/roadmap.md](docs/roadmap.md)
+- [docs/code-implementation.md](docs/code-implementation.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -59,9 +71,11 @@ Home Assistant custom integration for AVE Video V44 video intercom systems (VI2F
 
 ### Installazione tramite HACS
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cavuminfundo&repository=Ave-video44-HA&category=integration)
+
 1. Assicurarsi di aver installato HACS (Home Assistant Community Store).
 2. Andare su HACS -> Integrazioni -> Menu tre puntini in alto a destra -> Repository personalizzati.
-3. Incollare l'URL del repository: `https://github.com/federico/Ave-video44-HA` (o il percorso del proprio fork).
+3. Incollare l'URL del repository: `https://github.com/cavuminfundo/Ave-video44-HA` (o il percorso del proprio fork).
 4. Selezionare la categoria "Integrazione" e confermare.
 5. Cercare "AVE Video V44", cliccare su Scarica e riavviare Home Assistant.
 
@@ -144,9 +158,11 @@ Il template di automazione e incluso in `custom_components/ave_video44/blueprint
 
 ### Installation via HACS
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cavuminfundo&repository=Ave-video44-HA&category=integration)
+
 1. Make sure HACS is installed on your Home Assistant instance.
 2. In HACS, navigate to Integrations -> three dots menu (top right) -> Custom repositories.
-3. Add repository URL: `https://github.com/federico/Ave-video44-HA`.
+3. Add repository URL: `https://github.com/cavuminfundo/Ave-video44-HA`.
 4. Select category "Integration" and confirm.
 5. Find "AVE Video V44", click Download, and restart Home Assistant.
 

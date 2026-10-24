@@ -1,0 +1,49 @@
+name: Version guard
+
+on:
+  pull_request:
+    paths:
+      - "custom_components/ave_video44/manifest.json"
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Only one pull request raises the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          MANIFEST=custom_components/ave_video44/manifest.json
+
+          new=$(jq -r .version "$MANIFEST")
+          base=$(git show "$BASE:$MANIFEST" | jq -r .version)
+
+          if [ "$new" = "$base" ]; then
+            echo "Version unchanged ($base): nothing to check."
+            exit 0
+          fi
+
+          stable=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null | sed 's/^v//' || true)
+
+          if [ -z "$stable" ] || [ "$stable" = "null" ]; then
+            echo "No stable release published yet: the first number is chosen here."
+            exit 0
+          fi
+
+          if [ "$base" = "$stable" ]; then
+            echo "The manifest was still on the last stable ($stable) and this pull request opens $new."
+            echo "It is the first one after the release, so raising it is its job."
+            exit 0
+          fi
+
+          echo "::error file=$MANIFEST::The next release already has its number: $base, opened by the first pull request after stable $stable. This one changes it to $new, and whoever merges second inherits a conflict on a single line. Put \"version\": \"$base\" back in the manifest and add your entry to the ## v$base section already in CHANGELOG.md. If this really has to ship as a release of its own, say so on the pull request — that is a release decision, not this check's. The rule is in AGENTS.md, 'The version number is not yours to choose'." >&2
+          exit 1

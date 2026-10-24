@@ -1,5 +1,7 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
+const CARD_VERSION = "1.0.0";
+
 class AveVideo44Card extends HTMLElement {
   constructor() {
     super();
@@ -63,10 +65,10 @@ class AveVideo44Card extends HTMLElement {
     this._hass = hass;
     if (!this._config || !hass) return;
 
-    const cameraState = this._config.entity ? hass.states[this._config.entity]?.state : "";
-    const callSensorState = this._config.call_state_sensor ? hass.states[this._config.call_state_sensor]?.state : "";
-    const doorbellState = this._config.doorbell_binary_sensor ? hass.states[this._config.doorbell_binary_sensor]?.state : "";
-    const selectState = this._config.intercom_select ? hass.states[this._config.intercom_select]?.state : "";
+    const cameraState = (this._config.entity && hass.states[this._config.entity]) ? hass.states[this._config.entity].state : "";
+    const callSensorState = (this._config.call_state_sensor && hass.states[this._config.call_state_sensor]) ? hass.states[this._config.call_state_sensor].state : "";
+    const doorbellState = (this._config.doorbell_binary_sensor && hass.states[this._config.doorbell_binary_sensor]) ? hass.states[this._config.doorbell_binary_sensor].state : "";
+    const selectState = (this._config.intercom_select && hass.states[this._config.intercom_select]) ? hass.states[this._config.intercom_select].state : "";
 
     const signature = `${cameraState}|${callSensorState}|${doorbellState}|${selectState}|${this._callState}|${this._inCall}`;
     if (signature === this._lastStateSignature) {
@@ -492,7 +494,7 @@ class AveVideo44Card extends HTMLElement {
 
     const cameraEntity = this._config.entity || this._config.camera_entity;
     if (cameraEntity && this._hass && this._hass.states[cameraEntity]) {
-      const token = this._hass.states[cameraEntity].attributes?.access_token;
+      const token = this._hass.states[cameraEntity].attributes ? this._hass.states[cameraEntity].attributes.access_token : "";
       const streamUrl = token
         ? `/api/camera_proxy_stream/${cameraEntity}?token=${token}`
         : `/api/camera_proxy/${cameraEntity}`;

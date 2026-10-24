@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#v}"
+          manifest_ver=$(jq -r .version custom_components/ave_video44/manifest.json)
+          if [ "$manifest_ver" != "$ver" ]; then
+            echo "::error::manifest.json version ($manifest_ver) does not match tag ($TAG)"
+            exit 1
+          fi
+
+          python3 - "$TAG" <<'PY'
+          import pathlib, sys
+          tag = sys.argv[1]
+          header = f"## {tag} "
+          lines = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          out, in_sec = [], False
+          for line in lines:
+              if line.startswith(header):
+                  in_sec = True
+                  continue
+              if in_sec and line.startswith("## "):
+                  break
+              if in_sec:
+                  out.append(line)
+          notes = "\n".join(out).strip()
+          if not notes:
+              raise SystemExit(f"Empty or missing changelog section for {tag} in CHANGELOG.md")
+          pathlib.Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
+          PY
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file release-notes.md
+          fi

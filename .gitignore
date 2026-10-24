@@ -4,3 +4,17 @@ scratch/
 *.dex
 .env
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Environments & Packaging
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+uv.lock
+
+# Tools & Analysis
+.codegraph/
+graphify-out/
