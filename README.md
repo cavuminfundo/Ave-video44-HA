@@ -1,9 +1,21 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cavuminfundo/Ave-video44-HA/main/custom_components/ave_video44/brand/logo.png" alt="AVE Video V44" width="240" />
+</p>
+
 # AVE Video V44 Home Assistant Integration (`ave_video44`)
 
-[![HACS Custom Component](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/default)
+[![GitHub Release](https://img.shields.io/github/v/release/cavuminfundo/Ave-video44-HA?color=blue)](https://github.com/cavuminfundo/Ave-video44-HA/releases)
+[![Validate](https://github.com/cavuminfundo/Ave-video44-HA/actions/workflows/validate.yml/badge.svg)](https://github.com/cavuminfundo/Ave-video44-HA/actions/workflows/validate.yml)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cavuminfundo&repository=Ave-video44-HA&category=integration)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cavuminfundo&repository=Ave-video44-HA&category=integration)
+
+> [!CAUTION]
+> **[IT] PROGETTO IN FASE DI SVILUPPO ATTIVO — UTILIZZO A PROPRIO RISCHIO E PERICOLO**
+> Questa integrazione è un progetto indipendente e non ufficiale (non affiliato né supportato da AVE S.p.A.), attualmente in fase di **sviluppo attivo e sperimentazione**. Poiché interagisce con sistemi di controllo accessi fisici (serrature pedonali, cancelli carrai e postazioni videocitofoniche), l'installazione e l'utilizzo avvengono **esclusivamente a proprio rischio e pericolo**. Gli autori declinano ogni responsabilità per aperture involontarie, malfunzionamenti, danni hardware o interruzioni del servizio.
+>
+> **[EN] ACTIVE DEVELOPMENT — USE AT YOUR OWN RISK**
+> This integration is an independent, unofficial community project (not affiliated with or endorsed by AVE S.p.A.) and is currently under **active development**. Because it interacts with physical access control hardware (pedestrian locks, driveway gates, and video intercom stations), you use it **entirely at your own risk**. The authors assume no liability for unintended unlocks, malfunctions, hardware damage, or service disruptions.
 
 Integrazione Home Assistant per videocitofoni AVE Video V44 (dispositivi serie VI2F-PIT7WF, TS-SMART e compatibili protocollo GVS). Supporta video streaming live H.264/RTSP, sblocco serrature pedonali e carraie, gestione eventi di chiamata in arrivo, interfono bidirezionale multi-appartamento (HOUSETOHOUSE), card Lovelace integrata con audio full-duplex WebAudio (cancellazione eco e ricampionamento 8kHz PCM16) e Blueprint per notifiche Companion App con deep-link.
 

@@ -40,6 +40,8 @@ class AveVideo44IntercomTargetSelect(AveVideo44BaseEntity, SelectEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="intercom_target")
         self._attr_name = "Destinazione Interfono"
+        self._attr_translation_key = "intercom_target"
+        self._attr_icon = "mdi:book-account"
         self._attr_current_option = None
         self._init_options()
 

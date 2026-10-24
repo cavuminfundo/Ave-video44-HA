@@ -51,6 +51,12 @@ class AveVideo44Lock(AveVideo44BaseEntity, LockEntity):
         super().__init__(coordinator, device_id, unique_key=f"lock_{lock_id}")
         self._lock_id = lock_id
         self._attr_name = name
+        if str(lock_id) == "1":
+            self._attr_translation_key = "pedestrian"
+            self._attr_icon = "mdi:door"
+        else:
+            self._attr_translation_key = "driveway"
+            self._attr_icon = "mdi:gate"
         self._attr_is_locked = True
         self._relock_task: Optional[asyncio.Task] = None
 

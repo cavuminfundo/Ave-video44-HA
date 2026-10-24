@@ -1,0 +1,63 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "connectivity": {
+        "default": "mdi:lan-check"
+      },
+      "incoming_call": {
+        "default": "mdi:phone-ring"
+      }
+    },
+    "button": {
+      "answer": {
+        "default": "mdi:phone"
+      },
+      "call": {
+        "default": "mdi:phone-outgoing"
+      },
+      "hangup": {
+        "default": "mdi:phone-hangup"
+      },
+      "unlock_1": {
+        "default": "mdi:door-open"
+      },
+      "unlock_2": {
+        "default": "mdi:gate-open"
+      }
+    },
+    "camera": {
+      "live_stream": {
+        "default": "mdi:cctv"
+      }
+    },
+    "event": {
+      "doorbell": {
+        "default": "mdi:doorbell-video"
+      }
+    },
+    "lock": {
+      "driveway": {
+        "default": "mdi:gate"
+      },
+      "pedestrian": {
+        "default": "mdi:door"
+      }
+    },
+    "select": {
+      "intercom_target": {
+        "default": "mdi:book-account"
+      }
+    },
+    "sensor": {
+      "call_status": {
+        "default": "mdi:phone-in-talk"
+      },
+      "caller_name": {
+        "default": "mdi:card-account-details"
+      },
+      "last_call": {
+        "default": "mdi:history"
+      }
+    }
+  }
+}

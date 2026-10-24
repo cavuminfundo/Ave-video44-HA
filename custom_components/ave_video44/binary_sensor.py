@@ -47,6 +47,8 @@ class AveVideo44IncomingCallBinarySensor(AveVideo44BaseEntity, BinarySensorEntit
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="incoming_call")
         self._attr_name = "Chiamata in Arrivo"
+        self._attr_translation_key = "incoming_call"
+        self._attr_icon = "mdi:phone-ring"
 
     @property
     def is_on(self) -> bool:
@@ -66,6 +68,8 @@ class AveVideo44OnlineBinarySensor(AveVideo44BaseEntity, BinarySensorEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="connectivity")
         self._attr_name = "Connessione"
+        self._attr_translation_key = "connectivity"
+        self._attr_icon = "mdi:lan-check"
 
     @property
     def is_on(self) -> bool:

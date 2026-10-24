@@ -49,6 +49,12 @@ class AveVideo44UnlockButton(AveVideo44BaseEntity, ButtonEntity):
         super().__init__(coordinator, device_id, unique_key=f"btn_unlock_{lock_id}")
         self._lock_id = lock_id
         self._attr_name = name
+        if str(lock_id) == "1":
+            self._attr_translation_key = "unlock_1"
+            self._attr_icon = "mdi:door-open"
+        else:
+            self._attr_translation_key = "unlock_2"
+            self._attr_icon = "mdi:gate-open"
 
     async def async_press(self) -> None:
         """Trigger unlock."""
@@ -70,6 +76,8 @@ class AveVideo44CallButton(AveVideo44BaseEntity, ButtonEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="btn_call")
         self._attr_name = name
+        self._attr_translation_key = "call"
+        self._attr_icon = "mdi:phone-outgoing"
 
     async def async_press(self) -> None:
         """Initiate call."""
@@ -87,6 +95,8 @@ class AveVideo44AnswerButton(AveVideo44BaseEntity, ButtonEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="btn_answer")
         self._attr_name = name
+        self._attr_translation_key = "answer"
+        self._attr_icon = "mdi:phone"
 
     async def async_press(self) -> None:
         """Answer incoming call."""
@@ -104,6 +114,8 @@ class AveVideo44HangupButton(AveVideo44BaseEntity, ButtonEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="btn_hangup")
         self._attr_name = name
+        self._attr_translation_key = "hangup"
+        self._attr_icon = "mdi:phone-hangup"
 
     async def async_press(self) -> None:
         """Hang up call."""

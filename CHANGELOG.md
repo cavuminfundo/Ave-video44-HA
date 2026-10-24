@@ -16,6 +16,28 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.0.1 — 2026-10-24
+
+### 🇬🇧 English
+
+- **Complete Official 8-File Brand Suite (`custom_components/ave_video44/brand/`)**: Integrated crisp high-resolution brand assets derived directly from official AVE Video V44 assets (`ic_login_logo.png` and `icon.png`):
+  - Standard & Retina integration icons: `icon.png` (256×256) and `icon@2x.png` (512×512).
+  - Dark-mode compatible icons: `dark_icon.png` (256×256) and `dark_icon@2x.png` (512×512).
+  - Light-mode brand logos: `logo.png` (240×256) and `logo@2x.png` (480×512) featuring the signature red AVE emblem with dark wordmark.
+  - Dark-mode brand logos: `dark_logo.png` (240×256) and `dark_logo@2x.png` (480×512) featuring the red AVE emblem with crisp white wordmark for maximum contrast on dark Home Assistant dashboards.
+- **Home Assistant Brand Icons Specification & Translations (`icons.json`)**: Added `icons.json` and standardized `_attr_translation_key` / `_attr_icon` mappings across all 7 supported entity platforms (`lock`, `button`, `binary_sensor`, `sensor`, `event`, `select`, `camera`), providing contextual Material Design Icons for doorbell states, ring conditions, locks, and intercom selectors.
+- **Hero Brand Header & Prominent Caution Disclaimer**: Added centered brand header (`<img src=".../logo.png" width="240" />`), streamlined HACS badges, and bilingual active-development / physical access control `[!CAUTION]` disclaimer to `README.md`.
+
+### 🇮🇹 Italiano
+
+- **Suite Ufficiale Completa a 8 File per il Brand (`custom_components/ave_video44/brand/`)**: Integrati gli asset grafici ufficiali ad alta risoluzione ricavati direttamente dall'applicazione AVE Video V44 (`ic_login_logo.png` e `icon.png`):
+  - Icone integrazione standard e retina: `icon.png` (256×256) e `icon@2x.png` (512×512).
+  - Icone per tema scuro: `dark_icon.png` (256×256) e `dark_icon@2x.png` (512×512).
+  - Loghi ufficiali per tema chiaro: `logo.png` (240×256) e `logo@2x.png` (480×512) con emblema geometrico rosso AVE e logotipo nero.
+  - Loghi ufficiali per tema scuro: `dark_logo.png` (240×256) e `dark_logo@2x.png` (480×512) con emblema rosso AVE e logotipo bianco ad alto contrasto per le dashboard scure di Home Assistant.
+- **Specifiche Icone Native Home Assistant e Traduzioni (`icons.json`)**: Aggiunto il file `icons.json` e normalizzate le mappature `_attr_translation_key` / `_attr_icon` su tutte le 7 piattaforme (`lock`, `button`, `binary_sensor`, `sensor`, `event`, `select`, `camera`), garantendo icone Material Design coerenti per campanello, stati di chiamata, serrature e selettori rubrica.
+- **Header Hero con Logo Ufficiale e Disclaimer `[!CAUTION]`**: Inserito il logo centrato (`width="240"`), ripuliti i badge HACS e aggiunto il banner bilingue di avvertenza `[!CAUTION]` in `README.md` per l'uso consapevole su impianti di controllo accessi fisici in fase di sviluppo attivo.
+
 ## v1.0.0 — 2026-10-24
 
 ### 🇬🇧 English

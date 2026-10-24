@@ -41,6 +41,8 @@ class AveVideo44DoorbellEvent(AveVideo44BaseEntity, EventEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="doorbell_event")
         self._attr_name = "Campanello"
+        self._attr_translation_key = "doorbell"
+        self._attr_icon = "mdi:doorbell-video"
         self._unsub_ring: Optional[Callable[[], None]] = None
 
     @property

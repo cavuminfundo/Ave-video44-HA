@@ -42,6 +42,8 @@ class AveVideo44CallStatusSensor(AveVideo44BaseEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="call_status")
         self._attr_name = "Stato Chiamata"
+        self._attr_translation_key = "call_status"
+        self._attr_icon = "mdi:phone-in-talk"
 
     @property
     def native_value(self) -> str:
@@ -59,6 +61,8 @@ class AveVideo44CallerNameSensor(AveVideo44BaseEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="caller_name")
         self._attr_name = "Chiamante"
+        self._attr_translation_key = "caller_name"
+        self._attr_icon = "mdi:card-account-details"
 
     @property
     def native_value(self) -> str:
@@ -76,6 +80,8 @@ class AveVideo44LastCallSensor(AveVideo44BaseEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, device_id, unique_key="last_call")
         self._attr_name = "Ultima Chiamata"
+        self._attr_translation_key = "last_call"
+        self._attr_icon = "mdi:history"
 
     @property
     def native_value(self) -> Any:

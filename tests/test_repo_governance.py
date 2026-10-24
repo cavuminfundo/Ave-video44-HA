@@ -63,3 +63,58 @@ def test_github_workflows_and_gitignore_present():
         assert pattern in gitignore
     reqs = (ROOT / "requirements_test.txt").read_text(encoding="utf-8")
     assert "pyyaml" in reqs.lower()
+
+
+def test_icons_json_and_translation_keys():
+    icons_path = ROOT / "custom_components" / "ave_video44" / "icons.json"
+    assert icons_path.is_file(), "icons.json missing"
+    raw = json.loads(icons_path.read_text(encoding="utf-8"))
+    assert "entity" in raw, "icons.json missing top-level 'entity' key"
+    entity_dict = raw["entity"]
+
+    platforms = list(entity_dict.keys())
+    expected_platforms = ["binary_sensor", "button", "camera", "event", "lock", "select", "sensor"]
+    assert platforms == expected_platforms, f"Platforms not strictly sorted or missing: {platforms}"
+
+    en_trans = json.loads((ROOT / "custom_components" / "ave_video44" / "translations" / "en.json").read_text(encoding="utf-8"))
+    en_entity = en_trans.get("entity", {})
+
+    for platform, keys_dict in entity_dict.items():
+        keys = list(keys_dict.keys())
+        assert keys == sorted(keys), f"Translation keys for platform '{platform}' not alphabetically sorted"
+        assert platform in en_entity, f"Platform '{platform}' missing from translations/en.json"
+        assert set(keys) == set(en_entity[platform].keys()), f"Keys mismatch for platform '{platform}' between icons.json and en.json"
+        for entity_key, icon_data in keys_dict.items():
+            default_icon = icon_data.get("default", "")
+            assert default_icon.startswith("mdi:"), f"Icon '{default_icon}' for {platform}.{entity_key} must start with 'mdi:'"
+
+    manifest = json.loads((ROOT / "custom_components" / "ave_video44" / "manifest.json").read_text(encoding="utf-8"))
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
+
+    assert manifest["version"] == "1.0.1"
+    assert pyproject["project"]["version"] == "1.0.1"
+    match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
+    assert match is not None
+    assert match.group(1) == "1.0.1"
+
+
+def test_official_brand_suite_8_files():
+    brand_dir = ROOT / "custom_components" / "ave_video44" / "brand"
+    required = [
+        "icon.png",
+        "icon@2x.png",
+        "dark_icon.png",
+        "dark_icon@2x.png",
+        "logo.png",
+        "logo@2x.png",
+        "dark_logo.png",
+        "dark_logo@2x.png",
+    ]
+    for filename in required:
+        file_path = brand_dir / filename
+        assert file_path.is_file(), f"Missing brand file {filename}"
+        data = file_path.read_bytes()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{filename} is not a valid PNG"
+        assert len(data) > 4096, f"{filename} size is too small ({len(data)} <= 4096)"
+

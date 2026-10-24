@@ -41,6 +41,8 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         AveVideo44BaseEntity.__init__(self, coordinator, device_id, unique_key="camera")
         Camera.__init__(self)
         self._attr_name = "Telecamera"
+        self._attr_translation_key = "live_stream"
+        self._attr_icon = "mdi:cctv"
         self._attr_supported_features = CameraEntityFeature.STREAM
 
     async def stream_source(self) -> str | None:
