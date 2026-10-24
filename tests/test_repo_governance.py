@@ -18,6 +18,13 @@ def test_manifest_hassfest_and_repo_urls():
     assert raw["codeowners"] == ["@cavuminfundo"]
     assert raw["documentation"] == "https://github.com/cavuminfundo/Ave-video44-HA"
     assert raw["issue_tracker"] == "https://github.com/cavuminfundo/Ave-video44-HA/issues"
+    assert raw.get("dependencies") == ["http"]
+
+
+def test_license_file_present():
+    license_path = ROOT / "LICENSE"
+    assert license_path.is_file(), "Missing LICENSE file in repository root"
+    assert "MIT License" in license_path.read_text(encoding="utf-8")
 
 
 def test_hacs_json_manifest():

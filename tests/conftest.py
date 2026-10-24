@@ -20,6 +20,9 @@ def _ensure_ha_stubs():
     exceptions_mod = ModuleType("homeassistant.exceptions")
     helpers_mod = ModuleType("homeassistant.helpers")
     helpers_mod.__path__ = []
+    cv_mod = ModuleType("homeassistant.helpers.config_validation")
+    cv_mod.config_entry_only_config_schema = lambda domain: lambda config: config
+    helpers_mod.config_validation = cv_mod
     entity_mod = ModuleType("homeassistant.helpers.entity")
     update_coordinator_mod = ModuleType("homeassistant.helpers.update_coordinator")
     aiohttp_client_mod = ModuleType("homeassistant.helpers.aiohttp_client")
@@ -270,6 +273,7 @@ def _ensure_ha_stubs():
         "homeassistant.const": const_mod,
         "homeassistant.exceptions": exceptions_mod,
         "homeassistant.helpers": helpers_mod,
+        "homeassistant.helpers.config_validation": cv_mod,
         "homeassistant.helpers.entity": entity_mod,
         "homeassistant.helpers.device_registry": device_registry_mod,
         "homeassistant.helpers.entity_platform": entity_platform_mod,

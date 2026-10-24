@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+import homeassistant.helpers.config_validation as cv
 try:
     from homeassistant.components.http import StaticPathConfig
 except ImportError:
@@ -17,6 +18,8 @@ from .coordinator import AveVideo44Coordinator
 from .websocket_api import async_register_websocket_commands
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
     Platform.LOCK,
