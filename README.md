@@ -121,7 +121,7 @@ Questo popola dinamicamente il selettore `select.rubrica_interni` (con auto-seed
 
 ### Card Lovelace (ave-video44-card)
 
-La card personalizzata viene registrata automaticamente all'avvio di Home Assistant come modulo JavaScript nel registro risorse Lovelace tramite il percorso anti-cache `/ave_video44_card/ave-video44-card.js?v=1.2.7`, senza richiedere interventi manuali alle Risorse Lovelace (Zero-YAML).
+La card personalizzata viene registrata automaticamente all'avvio di Home Assistant come modulo JavaScript nel registro risorse Lovelace tramite il percorso anti-cache `/ave_video44_card/ave-video44-card.js?v=1.2.8`, senza richiedere interventi manuali alle Risorse Lovelace (Zero-YAML).
 
 Per aggiungere la card a qualsiasi plancia tramite editor visuale (Zero-YAML):
 1. In qualsiasi dashboard Lovelace, cliccare sul menu in alto a destra (tre puntini) -> **Modifica Plancia**.
@@ -230,7 +230,7 @@ This dynamically populates `select.rubrica_interni` (with automatic startup seed
 
 ### Lovelace Card (ave-video44-card)
 
-The bundled custom card is registered automatically on Home Assistant startup inside the Lovelace storage resource registry via the dedicated cache-bypass path `/ave_video44_card/ave-video44-card.js?v=1.2.7` (res_type: "module"), eliminating stale cache issues in mobile apps (Zero-YAML).
+The bundled custom card is registered automatically on Home Assistant startup inside the Lovelace storage resource registry via the dedicated cache-bypass path `/ave_video44_card/ave-video44-card.js?v=1.2.8` (res_type: "module"), eliminating stale cache issues in mobile apps (Zero-YAML).
 
 To add the card to any dashboard using the visual UI editor:
 1. In any Lovelace dashboard, click the top-right menu (three dots) -> **Edit Dashboard**.

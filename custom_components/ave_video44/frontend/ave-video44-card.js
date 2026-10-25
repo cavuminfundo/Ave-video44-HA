@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.2.7";
+const CARD_VERSION = "1.2.8";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -397,22 +397,6 @@ class AveVideo44Card extends HTMLElement {
           background: rgba(41, 182, 246, 0.26);
         }
 
-        .caller-banner {
-          position: absolute;
-          top: 12px;
-          left: 12px;
-          right: 12px;
-          padding: 8px 12px;
-          background: rgba(24, 24, 27, 0.85);
-          backdrop-filter: blur(4px);
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-size: 0.875rem;
-          z-index: 5;
-        }
-
         .controls-panel {
           padding: 16px;
           display: flex;
@@ -572,11 +556,6 @@ class AveVideo44Card extends HTMLElement {
         <div id="feedbackBanner" class="feedback-banner hidden" role="alert"></div>
 
         <div class="video-container" id="videoBox">
-          <div class="caller-banner hidden" id="callerBanner">
-            <span id="callerNameText"></span>
-            <span id="callDurationText">00:00</span>
-          </div>
-
           <div class="video-placeholder" id="videoPlaceholder" role="button" tabindex="0" aria-label="Attiva video posto esterno">
             <div class="placeholder-icon-bubble">
               <ha-icon icon="mdi:video-wireless-outline" style="--mdc-icon-size: 42px;"></ha-icon>
@@ -715,15 +694,6 @@ class AveVideo44Card extends HTMLElement {
         }
       }
     }
-
-    const callerNameEl = shadow.getElementById("callerNameText");
-    if (callerNameEl) {
-      if (this._callState === "monitoring") {
-        callerNameEl.textContent = "Monitoraggio Posto Esterno";
-      } else {
-        callerNameEl.textContent = "Chiamante: " + ((this._config && this._config.device_id) ? this._config.device_id : "Posto Esterno");
-      }
-    }
   }
 
   _stopFramePolling() {
@@ -830,7 +800,6 @@ class AveVideo44Card extends HTMLElement {
 
     const inCallControls = shadow.getElementById("inCallControls");
     const idleControls = shadow.getElementById("idleControls");
-    const callerBanner = shadow.getElementById("callerBanner");
     const container = shadow.getElementById("mainContainer");
     const placeholderText = shadow.getElementById("placeholderText");
     const liveVideo = shadow.getElementById("liveVideo");
@@ -886,13 +855,20 @@ class AveVideo44Card extends HTMLElement {
       container.setAttribute("aria-label", "Chiamata attiva videocitofono AVE");
       inCallControls.classList.remove("hidden");
       idleControls.classList.add("hidden");
-      callerBanner.classList.remove("hidden");
       const btnAnswer = shadow.getElementById("btnAnswer");
       if (btnAnswer) {
         if (this._callState === "ringing") {
           btnAnswer.classList.remove("hidden");
         } else {
           btnAnswer.classList.add("hidden");
+        }
+      }
+      const btnHangup = shadow.getElementById("btnHangup");
+      if (btnHangup) {
+        if (this._callState === "monitoring") {
+          btnHangup.classList.add("hidden");
+        } else {
+          btnHangup.classList.remove("hidden");
         }
       }
       const closeLabel = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
@@ -923,7 +899,6 @@ class AveVideo44Card extends HTMLElement {
       container.removeAttribute("aria-label");
       inCallControls.classList.add("hidden");
       idleControls.classList.remove("hidden");
-      callerBanner.classList.add("hidden");
       const isLoading = (this._callState === "loading");
       if (intercomSelect) {
         intercomSelect.disabled = isLoading;

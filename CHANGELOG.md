@@ -16,6 +16,20 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.8 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Lovelace Card UI Streamlining**:
+  - Removed redundant duplicate "Chiudi" hangup button (`#btnHangup`) during outdoor station video monitoring sessions, preserving a single clean close action via `#btnCallIntercom`.
+  - Completely removed the video feed overlay banner (`#callerBanner`) and its styles, providing a 100% unobstructed, crystal-clear camera view across all card states.
+
+### 🇮🇹 Italiano
+
+- **Snellimento Interfaccia Card Lovelace**:
+  - Rimosso il doppio pulsante "Chiudi" in alto (`#btnHangup`) durante le sessioni di monitoraggio del posto esterno, mantenendo un unico e chiaro comando di chiusura tramite `#btnCallIntercom`.
+  - Rimossa completamente la sovraimpressione video (`#callerBanner`) e i relativi stili, offrendo una vista telecamera pulita al 100% e priva di ostacoli visivi in tutti gli stati della card.
+
 ## v1.2.7 — 2026-10-25
 
 ### 🇬🇧 English

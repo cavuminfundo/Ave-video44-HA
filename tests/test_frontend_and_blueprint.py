@@ -322,6 +322,31 @@ def test_card_intercom_call_button_toggles_to_hangup_in_call():
     )
 
 
+def test_card_monitoring_hangup_and_clean_video():
+    """Verify clean video stream without banner overlay and #btnHangup hidden in monitoring mode."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+
+    # 1. Clean video stream with zero overlay
+    assert 'id="callerBanner"' not in content, "callerBanner DOM element must be removed for clean video stream"
+
+    # 2. No overlay CSS rule
+    assert ".caller-banner" not in content, ".caller-banner CSS rule must be removed"
+
+    # 3. btnHangup is hidden when in monitoring mode
+    assert 'shadow.getElementById("btnHangup")' in content
+    assert 'this._callState === "monitoring"' in content
+    assert (
+        'btnHangup.classList.add("hidden")' in content
+        or "btnHangup.classList.add('hidden')" in content
+    ), "btnHangup must be hidden when in monitoring mode"
+
+    # Check that hiding btnHangup is tied to monitoring state
+    assert re.search(
+        r'this\._callState\s*===\s*["\']monitoring["\'][\s\S]{1,120}btnHangup\.classList\.add\(["\']hidden["\']\)',
+        content,
+    ), "Card logic must hide btnHangup when this._callState === 'monitoring'"
+
+
 # ---------------------------------------------------------------------------
 # Test Suite 3: Brand PNG Assets Validation
 # ---------------------------------------------------------------------------
