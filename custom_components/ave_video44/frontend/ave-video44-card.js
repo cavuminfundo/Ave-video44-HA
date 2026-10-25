@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.2.2";
+const CARD_VERSION = "1.2.3";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -561,7 +561,7 @@ class AveVideo44Card extends HTMLElement {
             <span id="placeholderText">Tocca qui o premi "Attiva Video" per aprire la telecamera</span>
           </div>
 
-          <img id="cameraStreamImg" class="video-element hidden" alt="Live Camera Feed" />
+          <img id="cameraStreamImg" class="video-element hidden" alt="" />
           <video id="liveVideo" class="video-element hidden" autoplay playsinline muted></video>
         </div>
 
@@ -711,7 +711,7 @@ class AveVideo44Card extends HTMLElement {
     this._updateDynamicContent();
 
     const cameraEntity = this._config.entity || this._config.camera_entity;
-    const isVideoActive = Boolean(this._inCall || this._callState === "monitoring" || this._callState === "talking" || this._callState === "ringing");
+    const isVideoActive = Boolean(this._callState === "monitoring" || this._callState === "talking" || this._callState === "ringing");
     if (isVideoActive && cameraEntity && this._hass && this._hass.states[cameraEntity]) {
       const token = this._hass.states[cameraEntity].attributes ? this._hass.states[cameraEntity].attributes.access_token : "";
       let streamUrl = token
@@ -727,27 +727,40 @@ class AveVideo44Card extends HTMLElement {
           this._streamImgBound = true;
           this._imgRetryCount = 0;
           cameraStreamImg.onerror = () => {
-            if (this._inCall && this._imgRetryCount < 5) {
+            if (this._inCall && this._imgRetryCount < 8) {
               this._imgRetryCount++;
+              if (videoPlaceholder) {
+                videoPlaceholder.classList.remove("hidden");
+                if (placeholderText) {
+                  placeholderText.textContent = "Aggancio flusso video in corso...";
+                }
+              }
+              cameraStreamImg.classList.add("hidden");
               if (this._imgRetryTimer) {
                 clearTimeout(this._imgRetryTimer);
               }
               this._imgRetryTimer = setTimeout(() => {
                 if (this._inCall && cameraStreamImg) {
-                  const base = cameraStreamImg.src.split("&t=")[0];
-                  cameraStreamImg.src = `${base}&t=${Date.now()}`;
+                  const base = cameraStreamImg.src ? cameraStreamImg.src.split("&t=")[0] : "";
+                  if (base) {
+                    cameraStreamImg.src = `${base}&t=${Date.now()}`;
+                  }
                 }
-              }, 2200);
+              }, 1500);
             }
           };
           cameraStreamImg.onload = () => {
             this._imgRetryCount = 0;
+            if (videoPlaceholder) {
+              videoPlaceholder.classList.add("hidden");
+            }
+            cameraStreamImg.classList.remove("hidden");
+            cameraStreamImg.style.opacity = "1";
           };
         }
         if (cameraStreamImg.src !== streamUrl) {
           cameraStreamImg.src = streamUrl;
         }
-        cameraStreamImg.classList.remove("hidden");
       }
       if (liveVideo) {
         if (!liveVideo.srcObject && !liveVideo.getAttribute("src")) {
@@ -755,9 +768,6 @@ class AveVideo44Card extends HTMLElement {
         } else {
           liveVideo.classList.remove("hidden");
         }
-      }
-      if (videoPlaceholder) {
-        videoPlaceholder.classList.add("hidden");
       }
     } else {
       if (cameraStreamImg) {
@@ -802,13 +812,22 @@ class AveVideo44Card extends HTMLElement {
       idleControls.classList.remove("hidden");
       callerBanner.classList.add("hidden");
       if (placeholderText) {
-        placeholderText.textContent = "Nessuna chiamata attiva";
+        if (this._callState === "loading") {
+          placeholderText.textContent = "Connessione video al posto esterno in corso...";
+        } else {
+          placeholderText.textContent = "Nessuna chiamata attiva";
+        }
       }
     }
   }
 
   async _monitor() {
-    this._setCallState("monitoring");
+    this._setCallState("loading");
+    const shadow = this.shadowRoot;
+    const placeholderText = shadow ? shadow.getElementById("placeholderText") : null;
+    if (placeholderText) {
+      placeholderText.textContent = "Connessione video al posto esterno in corso...";
+    }
     try {
       if (this._hass) {
         if (this._config.wake_camera_button && this._hass.states && this._hass.states[this._config.wake_camera_button]) {
@@ -821,6 +840,14 @@ class AveVideo44Card extends HTMLElement {
             device_id: this._config.device_id || "",
             action: "monitor"
           });
+        }
+      }
+      this._setCallState("monitoring");
+      const cameraStreamImg = shadow ? shadow.getElementById("cameraStreamImg") : null;
+      if (cameraStreamImg && cameraStreamImg.src) {
+        const base = cameraStreamImg.src.split("&t=")[0];
+        if (base) {
+          cameraStreamImg.src = `${base}&t=${Date.now()}`;
         }
       }
     } catch (err) {
@@ -917,6 +944,11 @@ class AveVideo44Card extends HTMLElement {
     const selectEl = shadow.getElementById("intercomSelect");
     const target = selectEl ? selectEl.value : "";
     if (!target || !this._hass) return;
+
+    if (target === "1") {
+      this._monitor();
+      return;
+    }
 
     try {
       await this._hass.callService("ave_video44", "call_intercom", {

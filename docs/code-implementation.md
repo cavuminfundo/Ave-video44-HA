@@ -436,4 +436,14 @@ Because Home Assistant typically resides behind home router NATs:
    ```
 4. Decoded JPEG frames are stored in an asynchronous memory buffer, providing zero-latency delivery to `AveVideo44Camera.async_camera_image` and `handle_async_mjpeg_stream`.
 
+### 14.6 Home Assistant Core Multipart Boundary & Stream Synchronization (`async_wait_for_wake`)
+- **Core Boundary Invariant**: Home Assistant Core camera proxy endpoint (`/api/camera_proxy_stream`) mandates `Content-Type: multipart/x-mixed-replace; boundary=--frameboundary`. `camera.py` formats all multipart chunk boundaries to match this convention (`--frameboundary\r\nContent-Type: image/jpeg\r\n\r\n`), avoiding stream drops and parser failures in frontend image elements.
+- **Frontend Wake Synchronization**: When the user activates the camera from Lovelace ("Attiva Video"), `ave-video44-card.js` initiates wake signaling while opening the camera stream. To prevent `HTTP 502 Bad Gateway` caused by querying the camera before SIP/SRTP negotiation concludes, `AveVideo44Camera.handle_async_mjpeg_stream` implements `async_wait_for_wake`. This holds the response stream until `CloudSipMediaSession` registers the active session and decodes the initial JPEG frame.
+- **RTSPS Control Bypass**: In installations where devices report `protocol="0"`, calls to `control_monitoring` (RTSPS port 8322) are skipped entirely since live media is established directly via Cloud SIP `INVITE`.
+
+### 14.7 Non-Blocking SDP File I/O & Intercom Self-URI Filtering
+- **Non-Blocking SDP Descriptors**: Ephemeral SDP descriptor files required by internal media parsers are created via `asyncio.to_thread` execution, eliminating Home Assistant event loop blocking warnings during SIP media session bootstrap.
+- **Intercom Self-URI Isolation**: Device discovery examines the monitor's own SIP proxy address and excludes it from `select.rubrica_interni`. This prevents loopback entries where a monitor calls itself, preserving valid 2-wire hardware bus extension codes (`001-0002`, `001-0004`) for inter-apartment intercom calling even when cloud APIs return `associatedCommunityStatus: -1`.
+
+
 

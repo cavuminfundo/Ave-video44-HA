@@ -552,3 +552,111 @@ def test_mqtt_constants_and_default_credentials():
             password=DEFAULT_MQTT_PASS,
         )
         asyncio.run(listener.async_stop())
+
+
+@pytest.mark.asyncio
+async def test_camera_handle_async_mjpeg_stream_boundary_and_chunks(mock_coordinator):
+    """Verify camera handle_async_mjpeg_stream uses HA native --frameboundary and waits for wake."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+
+    dev_id = "9991"
+    fake_session = MagicMock()
+    fake_session.is_active = True
+    fake_session.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_data\xff\xd9")
+    # Return next frame once then terminate
+    async def _mock_wait_next(last_seq, timeout=0.5):
+        fake_session.is_active = False
+        return last_seq + 1, b"\xff\xd8fake_jpeg_2\xff\xd9"
+    fake_session.wait_for_next_frame = AsyncMock(side_effect=_mock_wait_next)
+    fake_session.frame_seq = 1
+
+    mock_coordinator.cloud_sip_sessions = {dev_id: fake_session}
+    mock_coordinator.async_wait_for_wake = AsyncMock()
+
+    cam = AveVideo44Camera(mock_coordinator, device_id=dev_id)
+
+    written_parts = []
+    fake_response = MagicMock()
+    fake_response.prepare = AsyncMock()
+    async def _mock_write(data):
+        written_parts.append(data)
+    fake_response.write = AsyncMock(side_effect=_mock_write)
+
+    with patch("aiohttp.web.StreamResponse", return_value=fake_response) as mock_stream_resp:
+        request = MagicMock()
+        resp = await cam.handle_async_mjpeg_stream(request)
+
+        mock_coordinator.async_wait_for_wake.assert_called_with(dev_id, timeout=10.0)
+        mock_stream_resp.assert_called_once()
+        headers = mock_stream_resp.call_args[1].get("headers", {})
+        assert headers.get("Content-Type") == "multipart/x-mixed-replace; boundary=--frameboundary"
+
+        assert len(written_parts) >= 1
+        assert written_parts[0].startswith(b"--frameboundary\r\nContent-Type: image/jpeg\r\n")
+        assert b"fake_jpeg_data" in written_parts[0]
+
+
+@pytest.mark.asyncio
+async def test_coordinator_wake_camera_cloud_sip_avoids_rtsps_and_syncs_wake_event(mock_coordinator):
+    """Verify async_wake_camera on TS-SMART 2-wire uses Cloud SIP exclusively without RTSPS 8322."""
+    dev_id = "677771932745207808"
+    mock_coordinator.devices = [{
+        "deviceId": dev_id,
+        "deviceIntercomInfo": {
+            "username": "sip:2114136144349364225@eu.open-sips.gvs-icloud.com",
+            "roomCode": "1-1-101",
+        },
+        "extraConfig": {"deviceNumber": "1"},
+    }]
+    mock_coordinator.api.get_sip_account = AsyncMock(return_value={
+        "username": "sip:2114136144349364224@eu.open-sips.gvs-icloud.com",
+        "password": "sip_account_pass",
+    })
+    mock_coordinator.api.control_monitoring = AsyncMock(return_value=123)
+    mock_coordinator.api.get_rtsp_config = AsyncMock(return_value={})
+
+    with patch("custom_components.ave_video44.coordinator.CloudSipMediaSession") as mock_session_cls:
+        fake_sess = MagicMock()
+        fake_sess.async_start = AsyncMock(return_value=True)
+        fake_sess.async_stop = AsyncMock()
+        fake_sess.is_active = True
+        mock_session_cls.return_value = fake_sess
+
+        res = await mock_coordinator.async_wake_camera(device_id=dev_id)
+
+        assert res == "sip:2114136144349364225@eu.open-sips.gvs-icloud.com"
+        assert mock_coordinator.active_rtsp_url is None
+        mock_coordinator.api.control_monitoring.assert_not_called()
+        mock_coordinator.api.get_rtsp_config.assert_not_called()
+        assert dev_id in mock_coordinator._wake_events
+        assert mock_coordinator._wake_events[dev_id].is_set()
+
+        # async_wait_for_wake should return immediately
+        await mock_coordinator.async_wait_for_wake(dev_id, timeout=1.0)
+
+
+def test_extract_discovered_intercoms_excludes_own_monitor(mock_coordinator):
+    """Verify _extract_discovered_intercoms_from_devices excludes the user's own monitor SIP URI."""
+    dev = {
+        "deviceId": "677771932745207808",
+        "deviceName": "Unità interna",
+        "extraConfig": {"deviceNumber": "1", "deviceName": "Citofono"},
+        "deviceIntercomInfo": [
+            {
+                "deviceId": "677771932745207808",
+                "username": "sip:2114136144349364224@eu.open-sips.gvs-icloud.com",
+                "deviceName": "Unità interna",
+                "haZone": "01",
+            },
+            {
+                "deviceId": "677771932745207999",
+                "username": "sip:2114136144349364999@eu.open-sips.gvs-icloud.com",
+                "deviceName": "Altro Interno",
+                "haZone": "02",
+            },
+        ],
+    }
+    discovered = mock_coordinator._extract_discovered_intercoms_from_devices([dev])
+    assert "sip:2114136144349364224@eu.open-sips.gvs-icloud.com" not in discovered
+    assert "sip:2114136144349364999@eu.open-sips.gvs-icloud.com" in discovered
+

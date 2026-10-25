@@ -148,7 +148,7 @@ custom_components/ave_video44/
 - Manages optimistic state transitions and dispatches event triggers for Home Assistant automations.
 
 ### 3.7 Entity Platforms
-- **`camera.py`**: Delivers instant MJPEG streaming (`multipart/x-mixed-replace`) and still frames (`async_camera_image`) sourced from the active Cloud SIP/SRTP session (`CloudSipMediaSession`) or RTSP stream. On 2-wire installations, returns `None` and disables `CameraEntityFeature.STREAM` when idle, activating dynamically only during calls or active monitoring.
+- **`camera.py`**: Delivers instant MJPEG streaming (`multipart/x-mixed-replace; boundary=--frameboundary`) and still frames (`async_camera_image`) sourced from the active Cloud SIP/SRTP session (`CloudSipMediaSession`) or RTSP stream, with `async_wait_for_wake` frontend-backend coordination preventing HTTP 502 race conditions. On 2-wire installations, returns `None` and disables `CameraEntityFeature.STREAM` when idle, activating dynamically only during calls or active monitoring.
 - **`lock.py`**: Dual-lock control (`Lock 1` pedestrian, `Lock 2` driveway) with automated relock after `unlock_pulse_duration` (default: 2s).
 - **`button.py`**:
   - `button.*_attiva_telecamera` (`AveVideo44WakeCameraButton`): Enabled by default. Wakes 2-wire outdoor stations on demand via `POST /smarthome/api/device-monitoring/monitoring` (`action=1`), dynamically provisioning the RTSP stream URL and transitioning state to `monitoring`.
@@ -156,7 +156,7 @@ custom_components/ave_video44/
 - **`event.py`**: Doorbell call events (`doorbell_press`, `call_answered`, `call_missed`) using `EventDeviceClass.DOORBELL`.
 - **`binary_sensor.py`**: Active call state and network connectivity binary sensors.
 - **`sensor.py`**: Current call lifecycle state (`idle`, `ringing`, `talking`, `monitoring`) and call duration telemetry.
-- **`select.py`**: Dynamic intercom extension selector configured via the integration's address book (`HOUSETOHOUSE`). Defaults to `Nessun interfono configurato` when no intercom contacts are registered.
+- **`select.py`**: Dynamic intercom extension selector configured via the integration's address book (`HOUSETOHOUSE`), filtering out the monitor's own SIP URI and defaulting to `Nessun interfono configurato` when empty.
 - **`diagnostics.py`**: Anonymized diagnostics export with redaction of tokens, passwords, and sensitive keys.
 
 ### 3.8 Frontend Subsystem & Card Auto-Registration (`frontend/`)

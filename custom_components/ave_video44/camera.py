@@ -70,6 +70,9 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
+        if hasattr(self.coordinator, "async_wait_for_wake"):
+            await self.coordinator.async_wait_for_wake(self.device_id, timeout=10.0)
+
         if hasattr(self.coordinator, "async_get_camera_frame"):
             sip_frame = await self.coordinator.async_get_camera_frame(self.device_id, timeout=6.0)
             if sip_frame:
@@ -91,6 +94,9 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self, request: Any
     ) -> Any:
         """Serve live MJPEG stream from Cloud SIP session or RTSP via FFmpeg."""
+        if hasattr(self.coordinator, "async_wait_for_wake"):
+            await self.coordinator.async_wait_for_wake(self.device_id, timeout=10.0)
+
         sessions = getattr(self.coordinator, "cloud_sip_sessions", {})
         if str(self.device_id) in sessions:
             session = sessions[str(self.device_id)]
@@ -102,32 +108,30 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                         status=200,
                         reason="OK",
                         headers={
-                            "Content-Type": "multipart/x-mixed-replace;boundary=--frame",
+                            "Content-Type": "multipart/x-mixed-replace; boundary=--frameboundary",
                             "Cache-Control": "no-cache, no-store, must-revalidate",
                         },
                     )
                     await response.prepare(request)
-                    part = (
-                        b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                        + str(len(frame)).encode()
-                        + b"\r\n\r\n"
-                        + frame
-                        + b"\r\n"
-                    )
-                    await response.write(part)
+                    header = (
+                        f"--frameboundary\r\n"
+                        f"Content-Type: image/jpeg\r\n"
+                        f"Content-Length: {len(frame)}\r\n\r\n"
+                    ).encode("utf-8")
+                    part = header + frame + b"\r\n"
                     await response.write(part)
 
                     last_seq = session.frame_seq
                     while session.is_active:
-                        last_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.6)
-                        if new_frame:
-                            p = (
-                                b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                                + str(len(new_frame)).encode()
-                                + b"\r\n\r\n"
-                                + new_frame
-                                + b"\r\n"
-                            )
+                        last_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.5)
+                        cur_frame = new_frame or session.latest_frame
+                        if cur_frame:
+                            p_header = (
+                                f"--frameboundary\r\n"
+                                f"Content-Type: image/jpeg\r\n"
+                                f"Content-Length: {len(cur_frame)}\r\n\r\n"
+                            ).encode("utf-8")
+                            p = p_header + cur_frame + b"\r\n"
                             await response.write(p)
                     return response
                 except (ConnectionResetError, asyncio.CancelledError):

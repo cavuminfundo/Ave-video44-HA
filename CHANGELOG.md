@@ -16,6 +16,30 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.3 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Frontend-Backend Stream Synchronization & Multipart Boundary Fix**:
+  - Resolved race condition when clicking *"Attiva Video"* in `ave-video44-card.js`: the frontend previously opened `/api/camera_proxy_stream` before the Cloud SIP/SRTP handshake settled, resulting in `HTTP 502 Bad Gateway`.
+  - Added `async_wait_for_wake` synchronization in `AveVideo44Camera` to hold stream initialization until the media session state transitions from standby to active.
+  - Aligned the MJPEG stream boundary to Home Assistant Core's native `multipart/x-mixed-replace; boundary=--frameboundary` specification.
+  - Eliminated superfluous `control_monitoring` API calls (port 8322 RTSPS) for 2-wire Cloud SIP `TS-SMART` systems (`protocol="0"`).
+- **Non-Blocking SDP I/O & Intercom Self-URI Filtering**:
+  - Moved temporary SDP descriptor file I/O to `asyncio.to_thread`, preventing event loop blocking warnings during SIP media session bootstrap.
+  - Filtered the indoor monitor's own SIP proxy URI from intercom auto-discovery to prevent loopback entries in `select.rubrica_interni`.
+
+### 🇮🇹 Italiano
+
+- **Sincronizzazione Stream Frontend-Backend e Allineamento Boundary Multipart**:
+  - Risolta la race condition al click su *"Attiva Video"* in `ave-video44-card.js`: il frontend tentava di aprire `/api/camera_proxy_stream` prima del completamento dell'handshake SIP/SRTP ricevendo `HTTP 502 Bad Gateway`.
+  - Aggiunto il coordinamento asincrono `async_wait_for_wake` su `AveVideo44Camera` per attendere che la sessione multimediale sia pienamente stabilita prima di servire i frame.
+  - Allineato il boundary del flusso MJPEG allo standard nativo di Home Assistant Core (`multipart/x-mixed-replace; boundary=--frameboundary`).
+  - Eliminata la chiamata superflua a `control_monitoring` (porta 8322 RTSPS) per i dispositivi Cloud SIP serie `TS-SMART` (`protocol="0"`).
+- **I/O SDP Non Bloccante e Filtraggio Self-URI Rubrica Interfono**:
+  - Spostata la scrittura su disco del descrittore SDP temporaneo su `asyncio.to_thread` per eliminare i warning di blocco dell'event loop di Home Assistant.
+  - Filtrato l'URI SIP proxy del monitor stesso durante l'auto-discovery della rubrica interfono, evitando voci di loopback in `select.rubrica_interni`.
+
 ## v1.2.2 — 2026-10-25
 
 ### 🇬🇧 English

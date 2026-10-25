@@ -840,12 +840,16 @@ class CloudSipMediaSession:
                 crypto_key=parsed_sdp["crypto_key"],
                 video_fmtp=parsed_sdp["video_fmtp"],
             )
-            with open(self._sdp_path, "w", encoding="utf-8") as f:
-                f.write(sdp_content)
-            try:
-                os.chmod(self._sdp_path, 0o600)
-            except Exception:
-                pass
+
+            def _write_sdp_file(path: str, data: str) -> None:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(data)
+                try:
+                    os.chmod(path, 0o600)
+                except Exception:
+                    pass
+
+            await asyncio.to_thread(_write_sdp_file, self._sdp_path, sdp_content)
 
             self._ffmpeg_proc = await asyncio.create_subprocess_exec(
                 self.ffmpeg_binary,
@@ -937,11 +941,15 @@ class CloudSipMediaSession:
         self._rtcp_sock = None
         self._audio_sock = None
 
-        if self._sdp_path and os.path.exists(self._sdp_path):
-            try:
-                os.remove(self._sdp_path)
-            except Exception:
-                pass
+        if self._sdp_path:
+            def _remove_sdp_file(path: str) -> None:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+
+            await asyncio.to_thread(_remove_sdp_file, self._sdp_path)
             self._sdp_path = None
 
         if self.on_terminated:

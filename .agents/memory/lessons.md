@@ -141,6 +141,20 @@
 - Port Invariant: The secure TLS port for the AVE/GVS EMQX broker is 18883.
 - Topic Hierarchy: In addition to device-specific topics (smarthome/device/{deviceId}), the integration must subscribe to plant-level topics smarthome/device/{homeId} and smarthome/device/status/{homeId} to guarantee event capture across all indoor monitors and doorstations.
 
+---
+
+## 2026-10-25 — v1.2.3 Home Assistant Core MJPEG Boundary, Stream Sync & 2-Wire Local Bus Directory
+
+### 21. Home Assistant Core Camera Proxy MJPEG Boundary & Wake Synchronization
+- Core Boundary Invariant: Home Assistant's camera proxy component (`/api/camera_proxy_stream`) expects MJPEG streams to adhere strictly to `Content-Type: multipart/x-mixed-replace; boundary=--frameboundary`. Using non-matching boundary strings such as `boundary=--frame` causes the Core camera proxy stream handler to misparse part boundaries or fail with decoding errors.
+- Wake Handshake Race Condition: When triggering on-demand camera wake ("Attiva Video") from custom Lovelace cards, requesting `/api/camera_proxy_stream` before the Cloud SIP/SRTP session completes its handshake results in an immediate `HTTP 502 Bad Gateway`. Implementing an asynchronous synchronization barrier (`async_wait_for_wake`) holds the camera proxy worker until the SIP session establishes and the initial JPEG frame is buffered.
+- RTSPS Control Exclusion: Dispatching `POST /smarthome/api/device-monitoring/control-monitoring` (designed for RTSPS on port 8322) is redundant and invalid for 2-wire Cloud SIP systems (`protocol="0"`), as the SIP `INVITE` dialog itself provisions and powers up the doorstation camera stream.
+
+### 22. 2-Wire Bus Local Extension Addressing vs Cloud Community Roster
+- Community Status Invariant: In standalone residential installations, the AVE/GVS cloud REST API returns `associatedCommunityStatus: -1` when indoor monitors are not registered to an enterprise multi-tenant cloud community. In this configuration, extension numbers (such as `001-0002` and `001-0004`) exist solely on the local 2-wire hardware bus rather than the cloud database.
+- Self-URI Filtering: Intercom auto-discovery must filter out the indoor monitor's own SIP proxy URI to prevent confusing self-calling loopback options in `select.rubrica_interni`. Local bus extension codes must be preserved in the address book for direct `HOUSETOHOUSE` intercom calling.
+
+
 
 
 

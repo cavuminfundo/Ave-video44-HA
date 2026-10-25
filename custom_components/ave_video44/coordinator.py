@@ -1,5 +1,6 @@
 """DataUpdateCoordinator for AVE Video V44 integration."""
 
+import asyncio
 from datetime import datetime, timezone
 import json
 import logging
@@ -53,6 +54,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         self.sip_session = AveSipSession()
         self.cloud_sip_sessions: Dict[str, CloudSipMediaSession] = {}
+        self._wake_events: Dict[str, asyncio.Event] = {}
         self.mqtt_listener: Optional[AveMqttListener] = None
 
         self.devices: List[Dict[str, Any]] = []
@@ -158,142 +160,165 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.active_device_id = str(device_id)
         self.async_update_listeners()
 
+    async def async_wait_for_wake(self, device_id: int | str, timeout: float = 10.0) -> None:
+        """Wait for an ongoing wake_camera attempt to finish on this device."""
+        ev = self._wake_events.get(str(device_id))
+        if ev and not ev.is_set():
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=timeout)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
     async def async_wake_camera(
         self, device_id: int | str, monitoring_device_number: Optional[str] = None
     ) -> Optional[str]:
         """Wake outdoor camera / start live monitoring session."""
         _LOGGER.debug("Waking camera for device %s", device_id)
-        dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
-        mon_num = monitoring_device_number
-        if not mon_num:
-            if dev and isinstance(dev.get("extraConfig"), dict):
-                mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
-            else:
-                mon_num = "1"
+        dev_str = str(device_id)
+        wake_ev = asyncio.Event()
+        self._wake_events[dev_str] = wake_ev
 
-        # Check for Cloud SIP session (TS-SMART 2-wire intercom)
-        intercom_info = dev.get("deviceIntercomInfo") if dev else None
-        target_sip_uri = None
-        if isinstance(intercom_info, dict):
-            u = intercom_info.get("username", "")
-            if str(u).startswith("sip:"):
-                target_sip_uri = str(u)
-        elif isinstance(intercom_info, list) and intercom_info:
-            for item in intercom_info:
-                if isinstance(item, dict):
-                    u = item.get("username", "")
-                    if str(u).startswith("sip:"):
-                        target_sip_uri = str(u)
-                        break
+        try:
+            dev = next((d for d in self.devices if str(d.get("deviceId")) == dev_str), None)
+            mon_num = monitoring_device_number
+            if not mon_num:
+                if dev and isinstance(dev.get("extraConfig"), dict):
+                    mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
+                else:
+                    mon_num = "1"
 
-        if target_sip_uri and self.api:
-            dev_str = str(device_id)
-            if dev_str in self.cloud_sip_sessions:
-                old_sess = self.cloud_sip_sessions.pop(dev_str)
-                try:
-                    await old_sess.async_stop()
-                except Exception:
-                    pass
+            # Check for Cloud SIP session (TS-SMART 2-wire intercom)
+            intercom_info = dev.get("deviceIntercomInfo") if dev else None
+            target_sip_uri = None
+            if isinstance(intercom_info, dict):
+                u = intercom_info.get("username", "")
+                if str(u).startswith("sip:"):
+                    target_sip_uri = str(u)
+            elif isinstance(intercom_info, list) and intercom_info:
+                for item in intercom_info:
+                    if isinstance(item, dict):
+                        u = item.get("username", "")
+                        if str(u).startswith("sip:"):
+                            target_sip_uri = str(u)
+                            break
 
-            try:
-                sip_acct = await self.api.get_sip_account(dev_str)
-                if isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password"):
-                    user_id = str(
-                        (dev.get("userId") if dev else None)
-                        or (dev.get("createUser") if dev else None)
-                        or (self.entry.data.get("user_id") if getattr(self, "entry", None) and getattr(self.entry, "data", None) else None)
-                        or "34964"
-                    )
-                    ffmpeg_bin = "ffmpeg"
+            started_sip = False
+            if target_sip_uri and self.api:
+                if dev_str in self.cloud_sip_sessions:
+                    old_sess = self.cloud_sip_sessions.pop(dev_str)
                     try:
-                        from homeassistant.components.ffmpeg import DATA_FFMPEG
-                        if hasattr(self, "hass") and self.hass and DATA_FFMPEG in self.hass.data:
-                            ffmpeg_bin = getattr(self.hass.data[DATA_FFMPEG], "binary", "ffmpeg")
+                        await old_sess.async_stop()
                     except Exception:
                         pass
 
-                    session = CloudSipMediaSession(
-                        device_id=dev_str,
-                        sip_username=str(sip_acct["username"]),
-                        sip_password=str(sip_acct["password"]),
-                        target_sip_uri=target_sip_uri,
-                        user_id=user_id,
-                        target_device_num=str(mon_num or "1"),
-                        sender_name="Citofono",
-                        ffmpeg_binary=ffmpeg_bin,
+                try:
+                    sip_acct = await self.api.get_sip_account(dev_str)
+                    if isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password"):
+                        user_id = str(
+                            (dev.get("userId") if dev else None)
+                            or (dev.get("createUser") if dev else None)
+                            or (self.entry.data.get("user_id") if getattr(self, "entry", None) and getattr(self.entry, "data", None) else None)
+                            or "34964"
+                        )
+                        ffmpeg_bin = "ffmpeg"
+                        try:
+                            from homeassistant.components.ffmpeg import DATA_FFMPEG
+                            if hasattr(self, "hass") and self.hass and DATA_FFMPEG in self.hass.data:
+                                ffmpeg_bin = getattr(self.hass.data[DATA_FFMPEG], "binary", "ffmpeg")
+                        except Exception:
+                            pass
+
+                        session = CloudSipMediaSession(
+                            device_id=dev_str,
+                            sip_username=str(sip_acct["username"]),
+                            sip_password=str(sip_acct["password"]),
+                            target_sip_uri=target_sip_uri,
+                            user_id=user_id,
+                            target_device_num=str(mon_num or "1"),
+                            sender_name="Citofono",
+                            ffmpeg_binary=ffmpeg_bin,
+                        )
+                        self.cloud_sip_sessions[dev_str] = session
+                        started_sip = await session.async_start()
+                except Exception as sip_err:
+                    _LOGGER.debug("Could not start CloudSipMediaSession: %s", sip_err)
+
+            if started_sip:
+                self.active_rtsp_url = None
+                self.active_device_id = dev_str
+                self.call_state = "monitoring"
+                self.async_update_listeners()
+                return target_sip_uri
+
+            call_id = None
+            if self.api:
+                try:
+                    call_id = await self.api.control_monitoring(
+                        device_id,
+                        monitoring_device_number=mon_num,
+                        action=1,
+                        resolution_level=0,
                     )
-                    self.cloud_sip_sessions[dev_str] = session
-                    await session.async_start()
-            except Exception as sip_err:
-                _LOGGER.debug("Could not start CloudSipMediaSession: %s", sip_err)
+                except Exception as err:
+                    _LOGGER.error("Failed to start camera monitoring on API: %s", err)
 
-        call_id = None
-        if self.api:
-            try:
-                call_id = await self.api.control_monitoring(
-                    device_id,
-                    monitoring_device_number=mon_num,
-                    action=1,
-                    resolution_level=0,
-                )
-            except Exception as err:
-                _LOGGER.error("Failed to start camera monitoring on API: %s", err)
+            scheme = "rtsps"
+            domain = "eu-video.gvs-icloud.com"
+            port = 8322
+            user = ""
+            pwd = ""
 
-        scheme = "rtsps"
-        domain = "eu-video.gvs-icloud.com"
-        port = 8322
-        user = ""
-        pwd = ""
+            if self.api:
+                try:
+                    rtsp_cfg = await self.api.get_rtsp_config()
+                    if isinstance(rtsp_cfg, dict):
+                        auth = rtsp_cfg.get("auth")
+                        if isinstance(auth, dict):
+                            basic = auth.get("basic")
+                            if isinstance(basic, dict):
+                                user = basic.get("username") or ""
+                                pwd = basic.get("password") or ""
+                        if not user:
+                            user = rtsp_cfg.get("account") or rtsp_cfg.get("username") or ""
+                        if not pwd:
+                            pwd = rtsp_cfg.get("password") or ""
 
-        if self.api:
-            try:
-                rtsp_cfg = await self.api.get_rtsp_config()
-                if isinstance(rtsp_cfg, dict):
-                    auth = rtsp_cfg.get("auth")
-                    if isinstance(auth, dict):
-                        basic = auth.get("basic")
-                        if isinstance(basic, dict):
-                            user = basic.get("username") or ""
-                            pwd = basic.get("password") or ""
-                    if not user:
-                        user = rtsp_cfg.get("account") or rtsp_cfg.get("username") or ""
-                    if not pwd:
-                        pwd = rtsp_cfg.get("password") or ""
+                        endpoints = rtsp_cfg.get("serverEndpoints")
+                        if isinstance(endpoints, list) and endpoints:
+                            ep0 = endpoints[0]
+                            if isinstance(ep0, dict):
+                                domain = ep0.get("domain") or domain
+                                ports_val = ep0.get("ports")
+                                if isinstance(ports_val, str):
+                                    try:
+                                        ports_val = json.loads(ports_val)
+                                    except Exception:
+                                        pass
+                                if isinstance(ports_val, dict):
+                                    port = ports_val.get("rtsps") or ports_val.get("rtsp") or port
+                        else:
+                            domain = rtsp_cfg.get("domain") or domain
+                            port = rtsp_cfg.get("port") or port
+                except Exception as err:
+                    _LOGGER.debug("Error fetching rtsp config: %s", err)
 
-                    endpoints = rtsp_cfg.get("serverEndpoints")
-                    if isinstance(endpoints, list) and endpoints:
-                        ep0 = endpoints[0]
-                        if isinstance(ep0, dict):
-                            domain = ep0.get("domain") or domain
-                            ports_val = ep0.get("ports")
-                            if isinstance(ports_val, str):
-                                try:
-                                    ports_val = json.loads(ports_val)
-                                except Exception:
-                                    pass
-                            if isinstance(ports_val, dict):
-                                port = ports_val.get("rtsps") or ports_val.get("rtsp") or port
-                    else:
-                        domain = rtsp_cfg.get("domain") or domain
-                        port = rtsp_cfg.get("port") or port
-            except Exception as err:
-                _LOGGER.debug("Error fetching rtsp config: %s", err)
+            user_enc = urllib.parse.quote(str(user), safe="") if user else ""
+            pwd_enc = urllib.parse.quote(str(pwd), safe="") if pwd else ""
+            target_num = mon_num or "1"
+            target_enc = urllib.parse.quote(str(target_num), safe="")
 
-        user_enc = urllib.parse.quote(str(user), safe="") if user else ""
-        pwd_enc = urllib.parse.quote(str(pwd), safe="") if pwd else ""
-        target_num = mon_num or "1"
-        target_enc = urllib.parse.quote(str(target_num), safe="")
+            self._last_rtsp_auth = (scheme, user_enc, pwd_enc, domain, port)
 
-        self._last_rtsp_auth = (scheme, user_enc, pwd_enc, domain, port)
+            auth_part = f"{user_enc}:{pwd_enc}@" if user_enc and pwd_enc else ""
+            self.active_rtsp_url = f"{scheme}://{auth_part}{domain}:{port}/stream/1/{device_id}/0/{target_enc}"
+            _LOGGER.debug("Active RTSP URL constructed for device %s (credentials redacted)", device_id)
 
-        auth_part = f"{user_enc}:{pwd_enc}@" if user_enc and pwd_enc else ""
-        self.active_rtsp_url = f"{scheme}://{auth_part}{domain}:{port}/stream/1/{device_id}/0/{target_enc}"
-        _LOGGER.debug("Active RTSP URL constructed for device %s (credentials redacted)", device_id)
-
-        self.active_device_id = str(device_id)
-        self.call_state = "monitoring"
-        self.async_update_listeners()
-        return self.active_rtsp_url
+            self.active_device_id = dev_str
+            self.call_state = "monitoring"
+            self.async_update_listeners()
+            return self.active_rtsp_url
+        finally:
+            wake_ev.set()
 
     async def async_get_camera_frame(
         self, device_id: int | str, timeout: float = 6.0
@@ -342,6 +367,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         """Extract discovered intercom contacts from devices extraConfig and deviceIntercomInfo."""
         discovered: Dict[str, str] = {}
         for dev in devices:
+            dev_id_str = str(dev.get("deviceId") or "")
             extra = dev.get("extraConfig")
             if isinstance(extra, dict):
                 dev_num = extra.get("deviceNumber")
@@ -353,6 +379,9 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             if isinstance(intercom_info, list):
                 for item in intercom_info:
                     if isinstance(item, dict):
+                        item_dev_id = str(item.get("deviceId") or "")
+                        if item_dev_id and item_dev_id == dev_id_str:
+                            continue
                         ha_zone = str(item.get("haZone") or "")
                         username = str(item.get("username") or "")
                         dev_name = item.get("deviceName") or "Unità interna"
@@ -360,6 +389,16 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                         if code:
                             label = f"Zona {ha_zone} - {dev_name}" if ha_zone else str(dev_name)
                             discovered[code] = label
+            elif isinstance(intercom_info, dict):
+                item_dev_id = str(intercom_info.get("deviceId") or "")
+                if not (item_dev_id and item_dev_id == dev_id_str):
+                    ha_zone = str(intercom_info.get("haZone") or "")
+                    username = str(intercom_info.get("username") or "")
+                    dev_name = intercom_info.get("deviceName") or "Unità interna"
+                    code = username or (f"010{ha_zone}" if ha_zone else "")
+                    if code:
+                        label = f"Zona {ha_zone} - {dev_name}" if ha_zone else str(dev_name)
+                        discovered[code] = label
         return discovered
 
     async def async_discover_intercoms(self) -> Dict[str, str]:
