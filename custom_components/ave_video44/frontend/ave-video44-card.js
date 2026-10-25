@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.1.1";
+const CARD_VERSION = "1.1.2";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -893,7 +893,9 @@ class AveVideo44Card extends HTMLElement {
   }
 }
 
-customElements.define("ave-video44-card", AveVideo44Card);
+if (!customElements.get("ave-video44-card")) {
+  customElements.define("ave-video44-card", AveVideo44Card);
+}
 
 class AveVideo44CardEditor extends HTMLElement {
   constructor() {
@@ -1042,12 +1044,16 @@ class AveVideo44CardEditor extends HTMLElement {
   }
 }
 
-customElements.define("ave-video44-card-editor", AveVideo44CardEditor);
+if (!customElements.get("ave-video44-card-editor")) {
+  customElements.define("ave-video44-card-editor", AveVideo44CardEditor);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "ave-video44-card",
-  name: "AVE Video V44 Card",
-  preview: true,
-  description: "Card Lovelace interattiva per videocitofoni AVE Video V44 con audio full-duplex WebAudio."
-});
+if (!window.customCards.some(function(c) { return c.type === "ave-video44-card"; })) {
+  window.customCards.push({
+    type: "ave-video44-card",
+    name: "AVE Video V44 Card",
+    preview: true,
+    description: "Card Lovelace interattiva per videocitofoni AVE Video V44 con audio full-duplex WebAudio."
+  });
+}

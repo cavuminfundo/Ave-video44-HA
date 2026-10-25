@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import tomllib
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,11 +93,11 @@ def test_icons_json_and_translation_keys():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
 
-    assert manifest["version"] == "1.1.1"
-    assert pyproject["project"]["version"] == "1.1.1"
+    assert manifest["version"] == "1.1.2"
+    assert pyproject["project"]["version"] == "1.1.2"
     match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
     assert match is not None
-    assert match.group(1) == "1.1.1"
+    assert match.group(1) == "1.1.2"
 
 
 def test_card_editor_and_zero_yaml_support():
@@ -115,7 +116,7 @@ def test_card_editor_and_zero_yaml_support():
 def test_init_add_extra_js_url():
     init_py = (ROOT / "custom_components" / "ave_video44" / "__init__.py").read_text(encoding="utf-8")
     assert "add_extra_js_url" in init_py
-    assert "/ave_video44_frontend/ave-video44-card.js?v=1.1.1" in init_py
+    assert "/ave_video44_frontend/ave-video44-card.js?v=1.1.2" in init_py
 
 
 
@@ -154,5 +155,57 @@ def test_diagnostics_redaction():
     assert redacted["jsessionid"] == "**REDACTED**"
     assert redacted["otp"] == "**REDACTED**"
     assert redacted["safe_key"] == "safe_val"
+
+
+def test_card_idempotent_guards():
+    """Verify customElements.define and customCards have idempotency guards."""
+    card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
+    assert 'customElements.get("ave-video44-card")' in card_js
+    assert 'customElements.get("ave-video44-card-editor")' in card_js
+    assert "window.customCards.some(" in card_js
+
+
+@pytest.mark.asyncio
+async def test_async_register_card_registers_lovelace_resource():
+    """Verify _async_register_card registers resource in Lovelace storage and domain data."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.ave_video44 import _async_register_card, DOMAIN
+
+    class FakeResources:
+        def __init__(self):
+            self.loaded = True
+            self.items = []
+
+        def async_items(self):
+            return list(self.items)
+
+        async def async_create_item(self, item):
+            self.items.append(dict(item, id="res_1"))
+
+        async def async_update_item(self, item_id, item):
+            for i, it in enumerate(self.items):
+                if it.get("id") == item_id:
+                    self.items[i] = dict(item, id=item_id)
+
+    class FakeLovelace:
+        def __init__(self):
+            self.resources = FakeResources()
+
+    hass = MagicMock()
+    hass.data = {
+        "lovelace": FakeLovelace(),
+        DOMAIN: {},
+    }
+    hass.http = MagicMock()
+    hass.http.async_register_static_paths = AsyncMock()
+
+    await _async_register_card(hass)
+
+    items = hass.data["lovelace"].resources.async_items()
+    assert len(items) == 1
+    assert items[0]["url"] == "/ave_video44_frontend/ave-video44-card.js?v=1.1.2"
+    assert items[0]["res_type"] == "module"
+    assert hass.data[DOMAIN]["card_registered"] is True
+
 
 

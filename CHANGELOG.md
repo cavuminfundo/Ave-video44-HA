@@ -16,6 +16,24 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.1.2 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Fixed Lovelace Dashboard Custom Element Error (`Custom element doesn't exist: ave-video44-card`)**:
+  - Resolved missing card in Home Assistant's Visual Card Picker (searching for `"ave"`) and `Custom element doesn't exist` dashboard warnings.
+  - Integration setup (`async_setup_entry`) now invokes `_async_register_card(hass)` directly to register `/ave_video44_frontend/ave-video44-card.js?v=1.1.2` as a JavaScript module (`res_type: "module"`) inside Home Assistant's Lovelace Storage resource registry (`lovelace.resources`), guaranteeing reliable loading across dashboard reloads and mobile app sessions.
+- **Idempotent Frontend Custom Element & Visual Card Registration**:
+  - Added guards with `customElements.get("ave-video44-card")` and duplicate checks on `window.customCards` array in `ave-video44-card.js` to ensure clean, error-free reloads without browser console warnings.
+
+### 🇮🇹 Italiano
+
+- **Risolto Errore Lovelace Custom Element (`Custom element doesn't exist: ave-video44-card`)**:
+  - Risolta la mancata visualizzazione della card nel selettore visuale delle schede (cercando `"ave"`) e l'errore `Custom element doesn't exist` nelle dashboard Lovelace.
+  - L'avvio dell'integrazione (`async_setup_entry`) richiama ora direttamente `_async_register_card(hass)` registrando programmaticamente l'URL `/ave_video44_frontend/ave-video44-card.js?v=1.1.2` come modulo JavaScript (`res_type: "module"`) nel registro risorse Lovelace (`lovelace.resources`), garantendo il caricamento immediato anche su app Companion e riavvii.
+- **Registrazione Idempotente dell'Elemento e della Card Visuale**:
+  - Introdotti controlli di protezione con `customElements.get("ave-video44-card")` e verifica duplicati su `window.customCards` in `ave-video44-card.js` per prevenire errori di doppia definizione e warning nella console del browser.
+
 ## v1.1.1 — 2026-10-25
 
 ### 🇬🇧 English

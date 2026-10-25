@@ -32,6 +32,64 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
+_CARD_VERSION = "1.1.2"
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Register frontend card static path, extra JS URL, and Lovelace storage resource."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("card_registered"):
+        return
+    domain_data["card_registered"] = True
+
+    resource_url = "/ave_video44_frontend/ave-video44-card.js?v=1.1.2"
+    frontend_dir = Path(__file__).parent / "frontend"
+    card_path = frontend_dir / "ave-video44-card.js"
+
+    # 1) Register static path
+    if hasattr(hass, "http") and hasattr(hass.http, "async_register_static_paths") and StaticPathConfig:
+        try:
+            await hass.http.async_register_static_paths([
+                StaticPathConfig(
+                    path=str(card_path),
+                    url_path=_CARD_URL,
+                    cache_headers=False,
+                )
+            ])
+            _LOGGER.debug("Registered static path for %s", _CARD_URL)
+        except Exception as err:
+            _LOGGER.debug("Could not register static path: %s", err)
+
+    # 2) Call add_extra_js_url
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+        add_extra_js_url(hass, "/ave_video44_frontend/ave-video44-card.js?v=1.1.2")
+    except Exception as err:
+        _LOGGER.debug("Could not call add_extra_js_url: %s", err)
+
+    # 3) Auto-register in Lovelace Storage resources
+    try:
+        lovelace = hass.data.get("lovelace")
+        resources = getattr(lovelace, "resources", None) if lovelace else None
+        if resources is not None:
+            if hasattr(resources, "loaded") and not resources.loaded and hasattr(resources, "async_load"):
+                await resources.async_load()
+            if hasattr(resources, "async_items"):
+                existing = [
+                    item for item in resources.async_items()
+                    if str(item.get("url", "")).startswith(_CARD_URL)
+                ]
+                if not existing and hasattr(resources, "async_create_item"):
+                    await resources.async_create_item({"res_type": "module", "url": resource_url})
+                elif existing and hasattr(resources, "async_update_item"):
+                    for item in existing:
+                        if item.get("url") != resource_url and "id" in item:
+                            await resources.async_update_item(item["id"], {"res_type": "module", "url": resource_url})
+    except Exception as err:
+        _LOGGER.debug("Could not auto-register Lovelace resource: %s", err)
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up AVE Video V44 global services and static card path."""
     hass.data.setdefault(DOMAIN, {"entries": {}, "ws_registered": False})
@@ -40,26 +98,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         async_register_websocket_commands(hass)
         hass.data[DOMAIN]["ws_registered"] = True
 
-    frontend_dir = Path(__file__).parent / "frontend"
-    card_path = frontend_dir / "ave-video44-card.js"
-    if hasattr(hass, "http") and hasattr(hass.http, "async_register_static_paths") and StaticPathConfig:
-        try:
-            await hass.http.async_register_static_paths([
-                StaticPathConfig(
-                    path=str(card_path),
-                    url_path="/ave_video44_frontend/ave-video44-card.js",
-                    cache_headers=True,
-                )
-            ])
-            _LOGGER.debug("Registered static path for /ave_video44_frontend/ave-video44-card.js")
-        except Exception as err:
-            _LOGGER.debug("Could not register static path: %s", err)
-
-    try:
-        from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, "/ave_video44_frontend/ave-video44-card.js?v=1.1.1")
-    except Exception as err:
-        _LOGGER.debug("Could not call add_extra_js_url: %s", err)
+    await _async_register_card(hass)
 
     return True
 
@@ -95,6 +134,8 @@ async def _async_disable_duplicate_unlock_buttons(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AVE Video V44 from a config entry."""
+    await _async_register_card(hass)
+
     coordinator = AveVideo44Coordinator(hass, entry)
 
     try:
