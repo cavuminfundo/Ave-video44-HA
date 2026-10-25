@@ -92,11 +92,31 @@ def test_icons_json_and_translation_keys():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
 
-    assert manifest["version"] == "1.0.2"
-    assert pyproject["project"]["version"] == "1.0.2"
+    assert manifest["version"] == "1.1.0"
+    assert pyproject["project"]["version"] == "1.1.0"
     match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
     assert match is not None
-    assert match.group(1) == "1.0.2"
+    assert match.group(1) == "1.1.0"
+
+
+def test_card_editor_and_zero_yaml_support():
+    card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
+    assert 'customElements.define("ave-video44-card-editor"' in card_js or "class AveVideo44CardEditor" in card_js
+    assert "getConfigElement" in card_js
+    assert "getStubConfig" in card_js
+    assert "_autoResolveEntities" in card_js
+    # Ensure no direct user interpolation into innerHTML in editor
+    editor_match = re.search(r"class AveVideo44CardEditor[\s\S]*?customElements\.define", card_js)
+    assert editor_match is not None, "AveVideo44CardEditor missing in card script"
+    editor_code = editor_match.group(0)
+    assert "${this._config" not in editor_code, "Prevent DOM XSS: do not interpolate config values directly into innerHTML"
+
+
+def test_init_add_extra_js_url():
+    init_py = (ROOT / "custom_components" / "ave_video44" / "__init__.py").read_text(encoding="utf-8")
+    assert "add_extra_js_url" in init_py
+    assert "/ave_video44_frontend/ave-video44-card.js?v=1.1.0" in init_py
+
 
 
 def test_official_brand_suite_8_files():

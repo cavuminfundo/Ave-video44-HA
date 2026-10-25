@@ -55,7 +55,42 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         except Exception as err:
             _LOGGER.debug("Could not register static path: %s", err)
 
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+        add_extra_js_url(hass, "/ave_video44_frontend/ave-video44-card.js?v=1.1.0")
+    except Exception as err:
+        _LOGGER.debug("Could not call add_extra_js_url: %s", err)
+
     return True
+
+
+async def _async_disable_duplicate_unlock_buttons(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Disable duplicate unlock button entities in the entity registry."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+        entries_to_disable = []
+        for reg_entry in list(registry.entities.values()):
+            entry_id = getattr(reg_entry, "config_entry_id", None)
+            unique_id = getattr(reg_entry, "unique_id", "")
+            if entry_id == entry.entry_id or unique_id.startswith(f"{entry.entry_id}_"):
+                if unique_id.endswith("_btn_unlock_1") or unique_id.endswith("_btn_unlock_2"):
+                    if reg_entry.disabled_by is None:
+                        entries_to_disable.append(reg_entry.entity_id)
+
+        for entity_id in entries_to_disable:
+            registry.async_update_entity(
+                entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
+            )
+            _LOGGER.debug(
+                "Disabled duplicate unlock button %s in favor of lock entity",
+                entity_id,
+            )
+    except Exception as err:
+        _LOGGER.debug("Could not disable duplicate unlock buttons: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -74,6 +109,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if hasattr(hass.config_entries, "async_forward_entry_setups"):
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    await _async_disable_duplicate_unlock_buttons(hass, entry)
 
     _async_register_services(hass)
 

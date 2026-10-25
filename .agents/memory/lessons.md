@@ -67,3 +67,23 @@
 - **Root Cause**: Subclasses that execute `self.config_entry = config_entry` in `__init__` raise `AttributeError: property 'config_entry' of 'AveVideo44OptionsFlow' object has no setter`, breaking the Configure options modal entirely.
 - **Fix**: Never assign `self.config_entry`. Rely on Home Assistant's automatic entry assignment via `async_get_options_flow` and access `self.config_entry` directly through the inherited property.
 
+---
+
+## 2026-10-25 — v1.1.0 Guided OptionsFlow, Entity Registry Migrations & Zero-YAML Lovelace Card
+
+### 9. Zero-YAML Lovelace Card Resource Injection & Browser Cache Busting
+- **Zero-YAML Registration**: Using Home Assistant's `add_extra_js_url(hass, f"/ave_video44_frontend/ave-video44-card.js?v={VERSION}")` directly via `card_loader.py` during entry setup eliminates the requirement for users to manually add resources in Lovelace dashboard settings.
+- **Cache-Busting Invariant**: Browsers aggressively cache static JavaScript resources. Without an explicit version query parameter (`?v=1.1.0`), users upgrading custom integrations frequently experience cached older script evaluations, missing new editor features or protocol fixes. Always append `?v={VERSION}`.
+- **Visual Editor Registration**: Exposing `window.customCards` metadata along with `getConfigElement()` and `getStubConfig(hass)` enables seamless card discovery in the Home Assistant dashboard UI card picker with automatic entity preselection.
+
+### 10. Entity Registry Disabled-by-Default Policy for Redundant Control Entities
+- **Dashboard Clutter Prevention**: When an integration provides multiple entity representations for the same physical actuator (such as `lock.posto_esterno_cancelletto_pedonale` with state feedback vs `button.apri_cancelletto` for instant pulses), exposing both by default clutters automatically generated Lovelace dashboards.
+- **Entity Registry Flag**: Setting `_attr_entity_registry_enabled_default = False` on the button entity keeps the primary control (`lock`) active while leaving the secondary trigger (`button`) available in the Entity Registry for users who explicitly require stateless pulse buttons or shortcut buttons.
+- **Non-Destructive for Existing Users**: In Home Assistant, `_attr_entity_registry_enabled_default` is evaluated only during initial entity registration; it does not unexpectedly disable entities for existing users who already configured them.
+
+### 11. Guided Interactive OptionsFlow Architecture & Default Dropdown Fallbacks
+- **User Experience in Multi-Entry Config**: Asking users to write raw comma-separated `code=label` strings in single text fields is error-prone. Providing a multi-step guided OptionsFlow (menu -> add/edit contact -> remove contact -> general settings) eliminates syntax errors and provides instant validation.
+- **Single-Click Removal**: Providing a dropdown populated with existing contact keys for the `remove_contact` step allows clean removal without requiring manual string manipulation or regex parsing by the user.
+- **Empty State Fallback**: When no contacts are configured, populating `select.rubrica_interni` with a disabled/default choice (`Nessun interfono configurato`) prevents Lovelace select cards from crashing or rendering blank unpopulated dropdowns.
+
+

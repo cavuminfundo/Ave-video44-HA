@@ -40,6 +40,8 @@ The `ave_video44` integration implements a hybrid architecture combining cloud e
 │                             ▼                              │           │
 │  ┌──────────────────────────────────────────────────┐      │           │
 │  │ Frontend: ave-video44-card.js (Lovelace Card)    │      │           │
+│  │ - Zero-YAML auto-registration (add_extra_js_url) │      │           │
+│  │ - AveVideo44CardEditor visual card editor        │      │           │
 │  │ - WebAudio 8kHz mono PCM16 Resampling Engine     │      │           │
 │  │ - WebRTC / RTSP live video player & call modal   │      │           │
 │  └──────────────────────────────────────────────────┘      │           │
@@ -51,7 +53,7 @@ The `ave_video44` integration implements a hybrid architecture combining cloud e
 ┌──────────────────────────────────────┐  ┌──────────────────────────────┐
 │          AVE / GVS Cloud             │  │   Local LAN Intercom Bus     │
 │   (avev2.gvs-icloud.com / EMQX)      │  │ (Outdoor Stations & Monitors)│
-└──────────────────────────────────────┘  └──────────────────────────────┘
+└──────────────────────────────────────┘  ┌──────────────────────────────┘
 ```
 
 ---
@@ -63,12 +65,12 @@ custom_components/ave_video44/
 ├── __init__.py                ← Entry setup, service registration, platform forwarding
 ├── manifest.json              ← Integration metadata, dependencies, Hassfest schema
 ├── const.py                   ← Domain constants, default timeouts, event types
-├── config_flow.py             ← UI setup flow (Password SHA256 & OTP) and OptionsFlow
+├── config_flow.py             ← UI setup flow (Password SHA256 & OTP) and guided OptionsFlow wizard
 ├── coordinator.py             ← DataUpdateCoordinator managing polling & MQTT dispatching
 ├── entity.py                  ← Base entity classes with common DeviceInfo bindings
 ├── camera.py                  ← RTSP H.264 camera entity with snapshot preview
 ├── lock.py                    ← Lock entities (pedestrian & driveway) with auto-relock
-├── button.py                  ← Instant pulse unlock action buttons
+├── button.py                  ← Instant pulse unlock action buttons (disabled by default)
 ├── event.py                   ← Doorbell call events (doorbell_press, answered, missed)
 ├── binary_sensor.py           ← Call in progress and online connectivity sensors
 ├── sensor.py                  ← Call state (idle, ringing, talking) and duration sensors
@@ -83,8 +85,8 @@ custom_components/ave_video44/
 │   ├── protocol.py            ← GVS binary protocol framing (magic header GVSGVS\xa5\xa5\xa5\xa5)
 │   └── sip_session.py         ← SIP 2.0 user agent & RTP PCMA / PCM16 audio bridge
 ├── frontend/
-│   ├── ave-video44-card.js    ← Custom Lovelace card with WebAudio 8kHz resampling
-│   └── card_loader.py         ← Automatic Lovelace resource registration handler
+│   ├── ave-video44-card.js    ← Custom Lovelace card with WebAudio 8kHz resampling & visual editor
+│   └── card_loader.py         ← Automatic Lovelace resource registration handler (add_extra_js_url)
 ├── blueprints/
 │   └── automation/
 │       └── incoming_call_notification.yaml ← Push notification & TTS automation blueprint
@@ -138,12 +140,24 @@ custom_components/ave_video44/
 ### 3.7 Entity Platforms
 - **`camera.py`**: Live RTSP stream (`rtsp://open-sips.gvs-icloud.com:554/...` or local LAN RTSP stream) with snapshot preview support.
 - **`lock.py`**: Dual-lock control (`Lock 1` pedestrian, `Lock 2` driveway) with automated relock after `unlock_pulse_duration` (default: 2s).
-- **`button.py`**: Instant trigger buttons for pedestrian and driveway unlocking.
+- **`button.py`**: Instant trigger buttons for pedestrian and driveway unlocking. Configured with `_attr_entity_registry_enabled_default = False` to prevent visual clutter in Home Assistant dashboards alongside primary `lock` entities, while remaining available in the Entity Registry for users requiring pulse shortcuts or automations.
 - **`event.py`**: Doorbell call events (`doorbell_press`, `call_answered`, `call_missed`) using `EventDeviceClass.DOORBELL`.
 - **`binary_sensor.py`**: Active call state and network connectivity binary sensors.
 - **`sensor.py`**: Current call lifecycle state (`idle`, `ringing`, `talking`, `monitoring`) and call duration telemetry.
-- **`select.py`**: Dynamic intercom extension selector configured via the integration's address book (`HOUSETOHOUSE`).
+- **`select.py`**: Dynamic intercom extension selector configured via the integration's address book (`HOUSETOHOUSE`). Defaults to `Nessun interfono configurato` when no intercom contacts are registered.
 - **`diagnostics.py`**: Anonymized diagnostics export with redaction of tokens, passwords, and sensitive keys.
+
+### 3.8 Frontend Subsystem & Card Auto-Registration (`frontend/`)
+- **Zero-YAML Injection**: `card_loader.py` registers the static card asset via `add_extra_js_url(hass, f"/ave_video44_frontend/ave-video44-card.js?v={VERSION}")` upon integration setup. This eliminates manual addition to Lovelace resources and guarantees client cache-busting on version upgrades.
+- **Visual Card Editor (`ave-video44-card-editor`)**: The custom element registers `window.customCards` metadata and implements `getConfigElement()` returning an interactive form editor (`AveVideo44CardEditor`).
+- **Entity Auto-Discovery**: Implements `getStubConfig(hass, entities, [entity])` and `_autoResolveEntities` to automatically scan the Home Assistant entity registry for AVE cameras, locks, doorbell sensors, and address book selectors, populating card fields instantly when added via the visual card picker.
+
+### 3.9 Guided Intercom Configuration Flow (`config_flow.py`)
+- **Guided OptionsFlow Wizard**: Multi-step interactive flow with dedicated sub-dialogs:
+  - `init`: Menu presenting options to Add or Edit Contact, Remove Contact, or General Settings.
+  - `add_contact`: Structured form with inputs for Contact Name (Room/Label) and Intercom Extension Code / Address (e.g., `0102`, `1-1-102` or IP/SIP). Validates against duplicates and formats into canonical options storage.
+  - `remove_contact`: Dropdown picker to select and delete an obsolete contact in a single click.
+  - `general_settings`: Configures relay pulse duration and preferred RTSP video stream profile.
 
 ---
 

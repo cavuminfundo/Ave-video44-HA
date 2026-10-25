@@ -273,6 +273,8 @@ except ImportError:
     sys.modules["voluptuous"] = vol_mod
     import voluptuous as vol
 
+from homeassistant.config_entries import ConfigEntry
+
 from custom_components.ave_video44.const import (
     CONF_ACCOUNT,
     CONF_AUTH_METHOD,
@@ -444,3 +446,90 @@ def test_options_flow_read_only_base_property():
     entry = MagicMock()
     flow = TestOptionsFlow(entry)
     assert flow.config_entry == entry
+
+
+@pytest.mark.asyncio
+async def test_options_flow_guided_add_intercom():
+    """Test guided wizard step to add an intercom contact."""
+    entry = ConfigEntry(
+        entry_id="test_opt_entry",
+        data={CONF_ACCOUNT: "test@example.com"},
+        options={
+            CONF_INTERCOM_BOOK: "1-1-101=Piano Terra",
+            CONF_UNLOCK_PULSE_DURATION: 2,
+            CONF_PREFERRED_VIDEO_STREAM: "sub_stream",
+        },
+    )
+    flow = AveVideo44OptionsFlow(entry)
+
+    # 1. Action picker
+    res_menu = await flow.async_step_init(None)
+    assert res_menu["type"] == "form"
+    assert res_menu["step_id"] == "init"
+
+    # 2. Select add_intercom action
+    res_form = await flow.async_step_init({"action": "add_intercom"})
+    assert res_form["type"] == "form"
+    assert res_form["step_id"] == "add_intercom"
+
+    # 3. Submit new contact
+    res_save = await flow.async_step_add_intercom({"intercom_name": "Taverna", "intercom_code": "0102"})
+    assert res_save["type"] == "create_entry"
+    book = res_save["data"][CONF_INTERCOM_BOOK]
+    assert "0102=Taverna" in book
+    assert "1-1-101=Piano Terra" in book
+    assert res_save["data"][CONF_UNLOCK_PULSE_DURATION] == 2
+
+
+@pytest.mark.asyncio
+async def test_options_flow_guided_remove_intercom():
+    """Test guided wizard step to remove an intercom contact."""
+    entry = ConfigEntry(
+        entry_id="test_opt_entry",
+        data={CONF_ACCOUNT: "test@example.com"},
+        options={
+            CONF_INTERCOM_BOOK: "0101=Piano Terra, 0102=Taverna",
+            CONF_UNLOCK_PULSE_DURATION: 2,
+            CONF_PREFERRED_VIDEO_STREAM: "sub_stream",
+        },
+    )
+    flow = AveVideo44OptionsFlow(entry)
+
+    res_form = await flow.async_step_init({"action": "remove_intercom"})
+    assert res_form["type"] == "form"
+    assert res_form["step_id"] == "remove_intercom"
+
+    res_save = await flow.async_step_remove_intercom({"remove_code": "0102"})
+    assert res_save["type"] == "create_entry"
+    book = res_save["data"][CONF_INTERCOM_BOOK]
+    assert "0102" not in book
+    assert "0101=Piano Terra" in book
+
+
+@pytest.mark.asyncio
+async def test_options_flow_guided_settings():
+    """Test guided wizard step for general settings preserving intercom book."""
+    entry = ConfigEntry(
+        entry_id="test_opt_entry",
+        data={CONF_ACCOUNT: "test@example.com"},
+        options={
+            CONF_INTERCOM_BOOK: "0101=Piano Terra",
+            CONF_UNLOCK_PULSE_DURATION: 2,
+            CONF_PREFERRED_VIDEO_STREAM: "sub_stream",
+        },
+    )
+    flow = AveVideo44OptionsFlow(entry)
+
+    res_form = await flow.async_step_init({"action": "settings"})
+    assert res_form["type"] == "form"
+    assert res_form["step_id"] == "settings"
+
+    res_save = await flow.async_step_settings({
+        CONF_UNLOCK_PULSE_DURATION: 4,
+        CONF_PREFERRED_VIDEO_STREAM: "main_stream",
+    })
+    assert res_save["type"] == "create_entry"
+    assert res_save["data"][CONF_UNLOCK_PULSE_DURATION] == 4
+    assert res_save["data"][CONF_PREFERRED_VIDEO_STREAM] == "main_stream"
+    assert res_save["data"][CONF_INTERCOM_BOOK] == "0101=Piano Terra"
+

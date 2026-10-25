@@ -74,12 +74,14 @@ Home Assistant custom integration for AVE Video V44 video intercom systems (VI2F
 | `camera` | `camera.posto_esterno_ingresso` | Stream video live RTSP e fermo immagine snapshot |
 | `lock` | `lock.posto_esterno_cancelletto_pedonale` | Serratura cancelletto pedonale (Lock 1) con auto-ripristino |
 | `lock` | `lock.posto_esterno_cancello_carraio` | Serratura cancello carrabile (Lock 2) |
-| `button` | `button.apri_cancelletto` | Pulsante rapido di apertura pedonale |
-| `button` | `button.apri_cancello_carraio` | Pulsante rapido di apertura carrabile |
+| `button` | `button.apri_cancelletto` | Pulsante rapido sblocco pedonale (disabilitato per impostazione predefinita in favore dell'entita lock) |
+| `button` | `button.apri_cancello_carraio` | Pulsante rapido sblocco carraio (disabilitato per impostazione predefinita in favore dell'entita lock) |
 | `event` | `event.posto_esterno_chiamata` | Evento campanello (doorbell_press, call_answered, call_missed) |
 | `binary_sensor` | `binary_sensor.posto_esterno_chiamata_in_corso` | Attivo durante lo squillo o la conversazione |
 | `sensor` | `sensor.posto_esterno_stato_chiamata` | Stato citofono (idle, ringing, talking, monitoring) |
 | `select` | `select.rubrica_interni` | Elenco contatti configurati per chiamate interfono |
+
+Nota: I pulsanti rapidi di apertura (`button.apri_cancelletto`, `button.apri_cancello_carraio`) sono disabilitati per impostazione predefinita nel Registro Entita per evitare duplicazioni visive nella dashboard Controlli con le entita `lock` dedicate, che gestiscono anche stato e temporizzazione del relè. Possono essere riabilitati in qualsiasi momento dal Registro Entita se desiderati per scorciatoie o automazioni.
 
 ### Installazione tramite HACS
 
@@ -102,17 +104,28 @@ Home Assistant custom integration for AVE Video V44 video intercom systems (VI2F
 
 ### Rubrica Interni (HOUSETOHOUSE)
 
-Nelle Opzioni dell'integrazione (Impostazioni -> Dispositivi e Servizi -> AVE Video V44 -> Configura) e possibile definire la Rubrica Interni nel formato `codice=etichetta` separati da virgola:
+Nelle Opzioni dell'integrazione (**Impostazioni -> Dispositivi e Servizi -> AVE Video V44 -> Configura**) e disponibile una procedura guidata interattiva passo-passo per gestire la rubrica:
 
-```text
-1-1-101=Piano Terra, 1-1-102=Primo Piano, 1-1-103=Appartamento Ovest
-```
+1. Selezionare **Aggiungi o modifica contatto**:
+   - Inserire il nome della stanza o locale (es. `Taverna`, `Studio`, `Primo Piano`).
+   - Inserire il codice interno GVS/AVE (es. `0102` o `1-1-102`) oppure l'indirizzo IP/SIP.
+2. Per eliminare contatti non piu utilizzati, selezionare **Rimuovi contatto** e scegliere la voce desiderata dal menu a tendina.
+3. Per regolare la durata dell'impulso relè o il flusso video preferito, selezionare **Impostazioni generali**.
 
-Questo popola dinamicamente il selettore `select.rubrica_interni` e abilita il servizio `ave_video44.call_intercom` per avviare comunicazioni voce tra alloggi.
+Questo popola dinamicamente il selettore `select.rubrica_interni` (con opzione predefinita `Nessun interfono configurato` quando la rubrica e vuota) e abilita il servizio `ave_video44.call_intercom` per avviare comunicazioni voce tra alloggi.
 
 ### Card Lovelace (ave-video44-card)
 
-La card personalizzata e inclusa e registrata automaticamente:
+La card personalizzata viene registrata automaticamente all'avvio di Home Assistant tramite `add_extra_js_url` con cache-busting dinamico (`?v=1.1.0`), senza richiedere l'aggiunta manuale alle Risorse Lovelace.
+
+Per aggiungere la card a qualsiasi plancia tramite editor visuale (Zero-YAML):
+1. In qualsiasi dashboard Lovelace, cliccare sul menu in alto a destra (tre puntini) -> **Modifica Plancia**.
+2. Cliccare su **Aggiungi scheda** in basso a destra.
+3. Cercare e selezionare **AVE Video V44 Card** dall'elenco delle schede disponibili.
+4. L'editor visuale (`ave-video44-card-editor`) scoprira e colleghera automaticamente la telecamera, le serrature, il campanello e i sensori del tuo impianto AVE.
+5. Cliccare su **Salva**.
+
+In alternativa, per plance gestite via YAML:
 
 ```yaml
 type: custom:ave-video44-card
@@ -127,6 +140,7 @@ lock_driveway: lock.posto_esterno_cancello_carraio
 ```
 
 Caratteristiche della Card:
+- Configurazione Zero-YAML con editor visuale integrato ed auto-discovery delle entita dell'impianto.
 - Design scuro tecnico ad alto contrasto conforme alle linee guida WCAG AA (rapporto di contrasto superiore a 4.5:1).
 - Memoizzazione degli stati per non interrompere lo streaming video o la chiamata in corso durante gli aggiornamenti di Home Assistant.
 - Supporto alla scorciatoia tasto Escape per chiudere la chiamata.
@@ -161,12 +175,14 @@ Il template di automazione e incluso in `custom_components/ave_video44/blueprint
 | `camera` | `camera.posto_esterno_ingresso` | Live RTSP stream and snapshot preview |
 | `lock` | `lock.posto_esterno_cancelletto_pedonale` | Pedestrian lock (Lock 1) with auto-relock |
 | `lock` | `lock.posto_esterno_cancello_carraio` | Driveway gate lock (Lock 2) |
-| `button` | `button.apri_cancelletto` | Instant pedestrian unlock trigger |
-| `button` | `button.apri_cancello_carraio` | Instant driveway gate trigger |
+| `button` | `button.apri_cancelletto` | Instant pedestrian unlock trigger (disabled by default in favor of lock entity) |
+| `button` | `button.apri_cancello_carraio` | Instant driveway gate trigger (disabled by default in favor of lock entity) |
 | `event` | `event.posto_esterno_chiamata` | Doorbell press and call termination events |
 | `binary_sensor` | `binary_sensor.posto_esterno_chiamata_in_corso` | On during ringing or active conversation |
 | `sensor` | `sensor.posto_esterno_stato_chiamata` | Intercom call state (idle, ringing, talking, monitoring) |
 | `select` | `select.rubrica_interni` | Configured intercom address book entries |
+
+Note: Instant unlock buttons (`button.apri_cancelletto`, `button.apri_cancello_carraio`) are disabled by default in the Entity Registry to prevent visual duplication on the Controls dashboard alongside dedicated `lock` entities, which also reflect relay state and timing. They can be re-enabled at any time in the Entity Registry for quick shortcuts or automations.
 
 ### Installation via HACS
 
@@ -189,17 +205,28 @@ Il template di automazione e incluso in `custom_components/ave_video44/blueprint
 
 ### Intercom Address Book (HOUSETOHOUSE)
 
-In integration options (Settings -> Devices & Services -> AVE Video V44 -> Configure), specify intercom extensions using comma-separated `code=label` pairs:
+In integration options (**Settings -> Devices & Services -> AVE Video V44 -> Configure**), an interactive step-by-step wizard is available to manage the address book:
 
-```text
-1-1-101=Ground Floor, 1-1-102=First Floor, 1-1-103=West Wing
-```
+1. Select **Add or edit contact**:
+   - Enter a friendly room or station name (e.g., `Downstairs`, `Study`, `Upper Floor`).
+   - Enter the GVS/AVE intercom extension code (e.g., `0102` or `1-1-102`) or IP/SIP address.
+2. To remove obsolete entries, select **Remove contact** and choose the entry from the dropdown menu.
+3. To adjust relay pulse duration or preferred video stream profile, select **General settings**.
 
-This populates `select.rubrica_interni` and empowers `ave_video44.call_intercom` to initiate calls between monitors.
+This dynamically populates `select.rubrica_interni` (with a default fallback `Nessun interfono configurato` when no intercom contacts are configured) and empowers `ave_video44.call_intercom` to initiate calls between indoor monitors.
 
 ### Lovelace Card (ave-video44-card)
 
-The bundled custom element card is served directly by the integration:
+The bundled custom card is registered automatically on Home Assistant startup via `add_extra_js_url` with dynamic cache-busting (`?v=1.1.0`), eliminating the need to manually add it to Lovelace Resources (Zero-YAML).
+
+To add the card to any dashboard using the visual UI editor:
+1. In any Lovelace dashboard, click the top-right menu (three dots) -> **Edit Dashboard**.
+2. Click **Add Card** at the bottom right.
+3. Search for and select **AVE Video V44 Card** from the card picker.
+4. The visual editor (`ave-video44-card-editor`) will automatically discover and populate your outdoor camera, locks, doorbell, and intercom entities.
+5. Click **Save**.
+
+Alternatively, for YAML-managed dashboards:
 
 ```yaml
 type: custom:ave-video44-card
@@ -214,11 +241,12 @@ lock_driveway: lock.posto_esterno_cancello_carraio
 ```
 
 Card Highlights:
+- Zero-YAML automatic registration with integrated visual editor and entity auto-discovery.
 - Dark technical utility theme compliant with WCAG AA contrast standards (> 4.5:1 ratio).
 - State memoization to preserve active calls and audio streaming across Home Assistant updates.
 - Full-duplex WebAudio with echo cancellation, automatic gain control, and 8kHz PCM16 resampling.
 - Accessible ARIA modal semantics with Escape key dismissal support.
-- Built-in error handling and zero decorative emoji clutter.
+- Built-in error handling, zero external heavyweight dependencies, and zero decorative emoji clutter.
 
 ### Notification Blueprint
 

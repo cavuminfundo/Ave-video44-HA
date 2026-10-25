@@ -44,9 +44,33 @@
     "step": {
       "init": {
         "title": "AVE Video V44 Options",
-        "description": "Configure the intercom phonebook and operational settings.",
+        "description": "Select an action to configure the intercom directory or operational settings.",
         "data": {
+          "action": "Action",
           "intercom_book": "Intercom Directory (format: code=Name, ...)",
+          "unlock_pulse_duration": "Unlock pulse duration (seconds)",
+          "preferred_video_stream": "Preferred video stream"
+        }
+      },
+      "add_intercom": {
+        "title": "Add Intercom Contact",
+        "description": "Enter the AVE room code and contact name.",
+        "data": {
+          "intercom_code": "Room Code (e.g. 0101)",
+          "intercom_name": "Contact Name (e.g. Basement)"
+        }
+      },
+      "remove_intercom": {
+        "title": "Remove Intercom Contact",
+        "description": "Select the contact to remove from the intercom directory.",
+        "data": {
+          "remove_code": "Contact to Remove"
+        }
+      },
+      "settings": {
+        "title": "General Settings",
+        "description": "Configure door unlock pulse duration and preferred video stream quality.",
+        "data": {
           "unlock_pulse_duration": "Unlock pulse duration (seconds)",
           "preferred_video_stream": "Preferred video stream"
         }

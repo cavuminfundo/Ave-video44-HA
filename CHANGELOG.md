@@ -16,6 +16,40 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.1.0 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Disabled Duplicate Unlock Button Entities (`Apriporta Pedonale` / `Apriporta Carraio`) by Default**:
+  - The instantaneous pulse unlock buttons (`button.apriporta_pedonale`, `button.apriporta_carraio`) are now disabled by default in the Home Assistant Entity Registry (`_attr_entity_registry_enabled_default = False`) to prevent UI clutter and confusion.
+  - The dedicated lock entities (`lock.serratura_pedonale`, `lock.cancello_carraio`) provide state feedback and pulse timing. Existing installations are automatically migrated on integration startup without breaking user configurations.
+- **Guided Intercom Phonebook Wizard in Integration Options (`OptionsFlow`)**:
+  - Replaced error-prone raw comma-separated string formatting with an intuitive step-by-step wizard in **Settings -> Devices & services -> AVE Video V44 -> Configure**:
+    - **Add/Edit Intercom Contact**: Input friendly Room Name (e.g. `"Taverna"`) and Hardware Extension/IP/SIP Address (e.g. `"0102"` or `"192.168.88.52"`).
+    - **Remove Intercom Contact**: Simple single-click dropdown selection to delete obsolete contacts.
+    - **General Settings**: Adjust relay unlock pulse duration (seconds) and preferred video stream (sub-stream vs main-stream).
+  - Clean `"Nessun interfono configurato"` default fallback option displayed on `select.destinazione_interfono` when the address book is empty, eliminating the confusing `unknown` state.
+- **Zero-YAML Lovelace Card Auto-Registration & Visual Editor**:
+  - Automatic frontend resource injection via `add_extra_js_url` with `?v=1.1.0` cache-busting: no manual YAML configuration or manual Lovelace resource registration required.
+  - Dynamic entity auto-discovery (`getStubConfig(hass)` and `_autoResolveEntities`): automatically detects camera, locks, and sensors from registered `ave_video44` devices in Home Assistant.
+  - Built-in visual card editor (`AveVideo44CardEditor` / `ave-video44-card-editor`) with sanitized DOM property manipulation to guard against XSS.
+
+### 🇮🇹 Italiano
+
+- **Disabilitazione Pulsanti Sblocco Duplicati (`Apriporta Pedonale` / `Apriporta Carraio`) per Impostazione Predefinita**:
+  - I pulsanti di apertura impulsiva (`button.apriporta_pedonale`, `button.apriporta_carraio`) sono ora disabilitati per impostazione predefinita nel Registro Entità (`_attr_entity_registry_enabled_default = False`) per evitare duplicazioni visive nella scheda Controlli.
+  - Le entità serratura dedicate (`lock.serratura_pedonale`, `lock.cancello_carraio`) gestiscono lo sblocco e il feedback visivo. Le installazioni esistenti vengono migrate automaticamente all'avvio senza alterare le configurazioni personalizzate.
+- **Wizard Guidato per la Rubrica Interfoni nelle Opzioni (`OptionsFlow`)**:
+  - Sostituita la precedente configurazione a stringa manuale con una procedura guidata passo-passo in **Impostazioni -> Dispositivi e servizi -> AVE Video V44 -> Configura**:
+    - **Aggiungi/Modifica contatto interfono**: Inserimento guidato del Nome Locale (es. `"Taverna"`) e Codice/Indirizzo Stanza o IP/SIP (es. `"0102"` o `"192.168.88.52"`).
+    - **Rimuovi contatto interfono**: Selezione rapida da menu a tendina per eliminare contatti obsoleti.
+    - **Impostazioni generali**: Configurazione della durata impulso relè e del flusso video preferito.
+  - Opzione predefinita pulita `"Nessun interfono configurato"` su `select.destinazione_interfono` quando la rubrica è vuota, eliminando lo stato `unknown`.
+- **Auto-Registrazione Zero-YAML della Card Lovelace ed Editor Visuale**:
+  - Iniezione automatica della risorsa frontend via `add_extra_js_url` con cache-busting `?v=1.1.0`: la card è immediatamente disponibile in **Aggiungi scheda** senza modifiche manuali a `configuration.yaml` o alle risorse Lovelace.
+  - Auto-discovery dinamico dei dispositivi ed entità (`getStubConfig(hass)` e `_autoResolveEntities`): configurazione istantanea con rilevamento automatico di telecamera, serrature e sensori associati.
+  - Editor visuale interattivo (`AveVideo44CardEditor` / `ave-video44-card-editor`) conforme agli standard di sicurezza DOM per prevenire vulnerabilità XSS.
+
 ## v1.0.2 — 2026-10-25
 
 ### 🇬🇧 English

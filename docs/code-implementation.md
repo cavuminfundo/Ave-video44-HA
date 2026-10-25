@@ -239,3 +239,82 @@ In `AveVideo44Coordinator`, when initializing or updating state:
   2. Queries `GET /smarthome/api/home/queryHomeList` to resolve the active `homeId`.
   3. Updates the entry's runtime state dynamically without breaking entity bindings or demanding manual integration reconfiguration.
 
+---
+
+## 9. Frontend Lovelace Card Auto-Registration & Visual Editor Contract
+
+### 9.1 Zero-YAML Resource Registration (`add_extra_js_url`)
+The custom element card is automatically registered during integration setup without requiring manual dashboard resource entry:
+
+```python
+async def async_register_card(hass: HomeAssistant) -> None:
+    """Register custom Lovelace card via static path and add_extra_js_url."""
+    from homeassistant.components.frontend import add_extra_js_url
+
+    card_path = Path(__file__).parent / "ave-video44-card.js"
+    url_path = f"/ave_video44_frontend/ave-video44-card.js?v={VERSION}"
+    hass.http.register_static_path(
+        "/ave_video44_frontend/ave-video44-card.js",
+        str(card_path),
+        cache_headers=False,
+    )
+    add_extra_js_url(hass, url_path)
+```
+
+- **Cache-Busting**: The URL parameter `?v={VERSION}` invalidates browser-cached scripts immediately upon upgrading the integration, preventing stale JavaScript evaluation.
+- **Fail-Safe Loading**: The loader handles headless and unit test environments gracefully where `hass.http` or `frontend` may not be initialized.
+
+### 9.2 Custom Card Visual Editor (`ave-video44-card-editor`)
+To support Home Assistant's UI card picker and visual dashboard editing:
+- **Card Registration**:
+  ```javascript
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "ave-video44-card",
+    name: "AVE Video V44 Card",
+    description: "Control AVE Video V44 intercoms with live video, audio, and door unlock.",
+    preview: true,
+  });
+  ```
+- **Editor Element Hook**: `AveVideo44Card.getConfigElement()` returns a newly instantiated `document.createElement("ave-video44-card-editor")`.
+- **Dynamic Entity Auto-Discovery (`getStubConfig`)**:
+  ```javascript
+  static getStubConfig(hass, entities, [entity]) {
+    const states = hass && hass.states ? Object.keys(hass.states) : [];
+    const findEntity = (prefix, fallback) => {
+      const match = states.find(id => id.startsWith(prefix) && (id.includes("posto_esterno") || id.includes("ave_video44")));
+      return match || fallback || "";
+    };
+    return {
+      type: "custom:ave-video44-card",
+      title: "Videocitofono",
+      entity: findEntity("camera.", "camera.posto_esterno_ingresso"),
+      intercom_select: findEntity("select.", "select.rubrica_interni"),
+      call_state_sensor: findEntity("sensor.", "sensor.posto_esterno_stato_chiamata"),
+      doorbell_binary_sensor: findEntity("binary_sensor.", "binary_sensor.posto_esterno_chiamata_in_corso"),
+      lock_pedestrian: findEntity("lock.", "lock.posto_esterno_cancelletto_pedonale"),
+      lock_driveway: findEntity("lock.", "lock.posto_esterno_cancello_carraio"),
+    };
+  }
+  ```
+- **Visual Editor Lifecycle**: `AveVideo44CardEditor` observes configuration changes via property setters, populates dropdown pickers (`ha-entity-picker`) filtered by entity domain, and fires standard `config-changed` custom events with updated configuration dictionaries.
+
+---
+
+## 10. Entity Registry Disabled-by-Default Policy & Relay Coexistence
+
+### 10.1 Lock vs Button Entity Coexistence
+The integration provides two mechanisms to operate doorstation relays:
+1. **Primary Control — `lock` entities** (`lock.posto_esterno_cancelletto_pedonale`, `lock.posto_esterno_cancello_carraio`):
+   - Fully represent lock state (`locked`, `unlocking`, `unlocked`).
+   - Feature automated relock timers with configurable pulse duration.
+   - Integrate seamlessly with Home Assistant security dashboards and voice assistants.
+2. **Instant Pulse — `button` entities** (`button.apri_cancelletto`, `button.apri_cancello_carraio`):
+   - Configured with `_attr_entity_registry_enabled_default = False`.
+   - Prevent UI clutter and duplicate switches in automatically generated Home Assistant dashboard views.
+   - Remain available in the Entity Registry for users wishing to bind instant pulse actions to physical wall buttons, shortcuts, or automations.
+
+### 10.2 Non-Destructive Registry Upgrades
+Setting `_attr_entity_registry_enabled_default = False` at the entity class level only affects newly created or discovered entities. Users who previously enabled or explicitly disabled button entities in their entity registry retain their customized visibility settings without breaking automations.
+
+

@@ -33,6 +33,8 @@ async def async_setup_entry(
 class AveVideo44IntercomTargetSelect(AveVideo44BaseEntity, SelectEntity):
     """Dropdown entity to select intercom destination room from book."""
 
+    DEFAULT_EMPTY_OPTION = "Nessun interfono configurato"
+
     def __init__(
         self,
         coordinator: AveVideo44Coordinator,
@@ -47,34 +49,46 @@ class AveVideo44IntercomTargetSelect(AveVideo44BaseEntity, SelectEntity):
 
     def _init_options(self) -> None:
         """Build options list from coordinator intercom book."""
-        opts = []
-        for code, name in self.coordinator.intercom_book.items():
-            opts.append(f"{code} ({name})")
-        self._attr_options = opts
-        if opts and (self._attr_current_option not in opts):
-            self._attr_current_option = opts[0]
+        opts = [f"{code} ({name})" for code, name in self.coordinator.intercom_book.items()]
+        if not opts:
+            self._attr_options = [self.DEFAULT_EMPTY_OPTION]
+            self._attr_current_option = self.DEFAULT_EMPTY_OPTION
+            self.coordinator.selected_intercom_targets[self.device_id] = ""
+        else:
+            self._attr_options = opts
+            if self._attr_current_option not in opts:
+                self._attr_current_option = opts[0]
             self.coordinator.selected_intercom_targets[self.device_id] = self.selected_room_code
+
+    def _handle_coordinator_update(self) -> None:
+        """Update options when coordinator refreshes."""
+        self._init_options()
+        self.async_write_ha_state()
 
     @property
     def current_option(self) -> str | None:
         """Return currently selected target."""
+        if not self.coordinator.intercom_book:
+            return self.DEFAULT_EMPTY_OPTION
         return self._attr_current_option
 
     @property
     def options(self) -> list[str]:
         """Return available intercom targets."""
         opts = [f"{code} ({name})" for code, name in self.coordinator.intercom_book.items()]
-        return opts or self._attr_options
+        return opts or [self.DEFAULT_EMPTY_OPTION]
 
     @property
     def selected_room_code(self) -> str:
         """Extract room code part from current option."""
-        if not self._attr_current_option:
+        if not self._attr_current_option or self._attr_current_option == self.DEFAULT_EMPTY_OPTION:
             return ""
         return self._attr_current_option.split(" (", 1)[0].strip()
 
     async def async_select_option(self, option: str) -> None:
         """Set new selected destination."""
+        if option == self.DEFAULT_EMPTY_OPTION:
+            return
         self._attr_current_option = option
         self.coordinator.selected_intercom_targets[self.device_id] = self.selected_room_code
         self.async_write_ha_state()

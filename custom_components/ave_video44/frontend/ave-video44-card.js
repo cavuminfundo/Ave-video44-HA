@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.0.2";
+const CARD_VERSION = "1.1.0";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -21,28 +21,114 @@ class AveVideo44Card extends HTMLElement {
     this._boundKeyDown = this._handleKeyDown.bind(this);
   }
 
-  static getStubConfig() {
-    return {
-      entity: "camera.posto_esterno_ingresso",
-      device_id: "doorstation_001",
-      intercom_select: "select.rubrica_interni",
-      call_state_sensor: "sensor.posto_esterno_stato_chiamata",
-      doorbell_binary_sensor: "binary_sensor.posto_esterno_chiamata_in_corso",
-      lock_pedestrian: "lock.posto_esterno_cancelletto_pedonale",
-      lock_driveway: "lock.posto_esterno_cancello_carraio"
+  static async getConfigElement() {
+    return document.createElement("ave-video44-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const stub = {
+      title: "AVE Video V44",
+      entity: "",
+      lock_pedestrian: "",
+      lock_driveway: "",
+      call_state_sensor: "",
+      doorbell_binary_sensor: "",
+      intercom_select: ""
     };
+    if (hass && hass.states) {
+      const keys = Object.keys(hass.states);
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (!stub.entity && k.indexOf("camera.") === 0 && (k.indexOf("unita_interna") !== -1 || k.indexOf("ave") !== -1)) {
+          stub.entity = k;
+        } else if (!stub.lock_pedestrian && k.indexOf("lock.") === 0 && (k.indexOf("pedonale") !== -1 || k.indexOf("pedestrian") !== -1)) {
+          stub.lock_pedestrian = k;
+        } else if (!stub.lock_driveway && k.indexOf("lock.") === 0 && (k.indexOf("carraio") !== -1 || k.indexOf("cancello") !== -1 || k.indexOf("driveway") !== -1)) {
+          stub.lock_driveway = k;
+        } else if (!stub.call_state_sensor && k.indexOf("sensor.") === 0 && k.indexOf("stato_chiamata") !== -1) {
+          stub.call_state_sensor = k;
+        } else if (!stub.doorbell_binary_sensor && k.indexOf("binary_sensor.") === 0 && (k.indexOf("chiamata_in_arrivo") !== -1 || k.indexOf("campanello") !== -1)) {
+          stub.doorbell_binary_sensor = k;
+        } else if (!stub.intercom_select && k.indexOf("select.") === 0 && (k.indexOf("interfono") !== -1 || k.indexOf("intercom") !== -1)) {
+          stub.intercom_select = k;
+        }
+      }
+    }
+    return stub;
   }
 
   setConfig(config) {
-    if (!config.device_id && !config.entity) {
-      throw new Error("ave-video44-card requires device_id or entity");
-    }
-    this._config = {
+    this._config = Object.assign({
       title: "AVE Video V44",
-      device_id: "doorstation_001",
-      ...config
-    };
+      device_id: ""
+    }, config || {});
     this._renderBase();
+  }
+
+  _autoResolveEntities(hass) {
+    if (!hass || !hass.states) return;
+    const states = hass.states;
+    const keys = Object.keys(states);
+
+    if (!this._config.entity && !this._config.camera_entity) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("camera.") === 0 && (k.indexOf("unita_interna") !== -1 || k.indexOf("ave") !== -1)) {
+          this._config.entity = k;
+          break;
+        }
+      }
+    }
+
+    if (!this._config.lock_pedestrian) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("lock.") === 0 && (k.indexOf("pedonale") !== -1 || k.indexOf("pedestrian") !== -1)) {
+          this._config.lock_pedestrian = k;
+          break;
+        }
+      }
+    }
+
+    if (!this._config.lock_driveway) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("lock.") === 0 && (k.indexOf("carraio") !== -1 || k.indexOf("cancello") !== -1 || k.indexOf("driveway") !== -1)) {
+          this._config.lock_driveway = k;
+          break;
+        }
+      }
+    }
+
+    if (!this._config.call_state_sensor) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("sensor.") === 0 && k.indexOf("stato_chiamata") !== -1) {
+          this._config.call_state_sensor = k;
+          break;
+        }
+      }
+    }
+
+    if (!this._config.doorbell_binary_sensor) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("binary_sensor.") === 0 && (k.indexOf("chiamata_in_arrivo") !== -1 || k.indexOf("campanello") !== -1)) {
+          this._config.doorbell_binary_sensor = k;
+          break;
+        }
+      }
+    }
+
+    if (!this._config.intercom_select) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("select.") === 0 && (k.indexOf("interfono") !== -1 || k.indexOf("intercom") !== -1)) {
+          this._config.intercom_select = k;
+          break;
+        }
+      }
+    }
   }
 
   connectedCallback() {
@@ -64,6 +150,7 @@ class AveVideo44Card extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config || !hass) return;
+    this._autoResolveEntities(hass);
 
     const cameraState = (this._config.entity && hass.states[this._config.entity]) ? hass.states[this._config.entity].state : "";
     const callSensorState = (this._config.call_state_sensor && hass.states[this._config.call_state_sensor]) ? hass.states[this._config.call_state_sensor].state : "";
@@ -598,15 +685,27 @@ class AveVideo44Card extends HTMLElement {
 
   async _unlock(lockId) {
     if (!this._hass) return;
+    let targetLock = "";
+    if (lockId === "1" && this._config.lock_pedestrian) {
+      targetLock = this._config.lock_pedestrian;
+    } else if (lockId === "2" && this._config.lock_driveway) {
+      targetLock = this._config.lock_driveway;
+    }
+
     try {
-      await this._hass.connection.sendMessagePromise({
-        type: "ave_video44/call_control",
-        device_id: this._config.device_id,
-        action: "unlock",
-        lock_id: lockId
-      });
+      if (targetLock && this._hass.states && this._hass.states[targetLock]) {
+        await this._hass.callService("lock", "unlock", { entity_id: targetLock });
+      } else {
+        await this._hass.connection.sendMessagePromise({
+          type: "ave_video44/call_control",
+          device_id: this._config.device_id || "",
+          action: "unlock",
+          lock_id: lockId
+        });
+      }
     } catch (err) {
-      this._showError(`Apertura non riuscita: ${err.message}`);
+      const errMsg = (err && err.message) ? err.message : String(err);
+      this._showError(`Apertura non riuscita: ${errMsg}`);
     }
   }
 
@@ -795,6 +894,155 @@ class AveVideo44Card extends HTMLElement {
 }
 
 customElements.define("ave-video44-card", AveVideo44Card);
+
+class AveVideo44CardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+    this._hass = null;
+    this._initialized = false;
+  }
+
+  setConfig(config) {
+    this._config = Object.assign({}, config || {});
+    if (!this._initialized) {
+      this._render();
+      this._initialized = true;
+    }
+    this._updateValues();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  _render() {
+    const shadow = this.shadowRoot;
+    shadow.innerHTML = `
+      <style>
+        .card-config {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          padding: 8px 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          box-sizing: border-box;
+        }
+        .config-row {
+          display: flex;
+          flex-direction: column;
+        }
+        label {
+          font-size: 0.875rem;
+          font-weight: 500;
+          margin-bottom: 4px;
+          color: var(--primary-text-color, #e4e4e7);
+        }
+        input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 8px 10px;
+          border-radius: 6px;
+          border: 1px solid var(--divider-color, #3f3f46);
+          background-color: var(--card-background-color, #27272a);
+          color: var(--primary-text-color, #f4f4f5);
+          font-size: 0.875rem;
+          outline: none;
+        }
+        input:focus {
+          border-color: #2563eb;
+        }
+      </style>
+      <div class="card-config">
+        <div class="config-row">
+          <label for="cfgTitle">Titolo Card</label>
+          <input id="cfgTitle" type="text" placeholder="AVE Video V44" />
+        </div>
+        <div class="config-row">
+          <label for="cfgEntity">Entità Telecamera</label>
+          <input id="cfgEntity" type="text" placeholder="camera.unita_interna_cloud_due_fili_ts_smart_telecamera" />
+        </div>
+        <div class="config-row">
+          <label for="cfgPedestrian">Serratura Pedonale</label>
+          <input id="cfgPedestrian" type="text" placeholder="lock.unita_interna_cloud_due_fili_ts_smart_serratura_pedonale" />
+        </div>
+        <div class="config-row">
+          <label for="cfgDriveway">Cancello Carraio</label>
+          <input id="cfgDriveway" type="text" placeholder="lock.unita_interna_cloud_due_fili_ts_smart_cancello_carraio" />
+        </div>
+        <div class="config-row">
+          <label for="cfgCallSensor">Sensore Stato Chiamata</label>
+          <input id="cfgCallSensor" type="text" placeholder="sensor.unita_interna_cloud_due_fili_ts_smart_stato_chiamata" />
+        </div>
+        <div class="config-row">
+          <label for="cfgDoorbell">Sensore Chiamata in Arrivo</label>
+          <input id="cfgDoorbell" type="text" placeholder="binary_sensor.unita_interna_cloud_due_fili_ts_smart_chiamata_in_arrivo" />
+        </div>
+        <div class="config-row">
+          <label for="cfgIntercomSelect">Selettore Rubrica Interni</label>
+          <input id="cfgIntercomSelect" type="text" placeholder="select.unita_interna_cloud_due_fili_ts_smart_destinazione_interfono" />
+        </div>
+      </div>
+    `;
+
+    const titleInput = shadow.getElementById("cfgTitle");
+    const entityInput = shadow.getElementById("cfgEntity");
+    const pedInput = shadow.getElementById("cfgPedestrian");
+    const driveInput = shadow.getElementById("cfgDriveway");
+    const callInput = shadow.getElementById("cfgCallSensor");
+    const bellInput = shadow.getElementById("cfgDoorbell");
+    const selectInput = shadow.getElementById("cfgIntercomSelect");
+
+    titleInput.addEventListener("change", () => this._handleInput("title", titleInput.value));
+    entityInput.addEventListener("change", () => this._handleInput("entity", entityInput.value));
+    pedInput.addEventListener("change", () => this._handleInput("lock_pedestrian", pedInput.value));
+    driveInput.addEventListener("change", () => this._handleInput("lock_driveway", driveInput.value));
+    callInput.addEventListener("change", () => this._handleInput("call_state_sensor", callInput.value));
+    bellInput.addEventListener("change", () => this._handleInput("doorbell_binary_sensor", bellInput.value));
+    selectInput.addEventListener("change", () => this._handleInput("intercom_select", selectInput.value));
+  }
+
+  _updateValues() {
+    const shadow = this.shadowRoot;
+    if (!shadow || !this._config) return;
+
+    const titleInput = shadow.getElementById("cfgTitle");
+    const entityInput = shadow.getElementById("cfgEntity");
+    const pedInput = shadow.getElementById("cfgPedestrian");
+    const driveInput = shadow.getElementById("cfgDriveway");
+    const callInput = shadow.getElementById("cfgCallSensor");
+    const bellInput = shadow.getElementById("cfgDoorbell");
+    const selectInput = shadow.getElementById("cfgIntercomSelect");
+
+    if (titleInput) titleInput.value = this._config.title || "";
+    if (entityInput) entityInput.value = this._config.entity || this._config.camera_entity || "";
+    if (pedInput) pedInput.value = this._config.lock_pedestrian || "";
+    if (driveInput) driveInput.value = this._config.lock_driveway || "";
+    if (callInput) callInput.value = this._config.call_state_sensor || "";
+    if (bellInput) bellInput.value = this._config.doorbell_binary_sensor || "";
+    if (selectInput) selectInput.value = this._config.intercom_select || "";
+  }
+
+  _handleInput(key, value) {
+    if (!this._config) this._config = {};
+    if (this._config[key] === value) return;
+    this._config = Object.assign({}, this._config);
+    if (value) {
+      this._config[key] = value;
+    } else {
+      delete this._config[key];
+    }
+    const event = new CustomEvent("config-changed", {
+      detail: { config: this._config },
+      bubbles: true,
+      composed: true
+    });
+    this.dispatchEvent(event);
+  }
+}
+
+customElements.define("ave-video44-card-editor", AveVideo44CardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

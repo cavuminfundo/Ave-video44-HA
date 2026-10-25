@@ -108,6 +108,9 @@ def _ensure_ha_stubs():
             self.entity_id = None
             self._attr_name = None
             self._attr_unique_id = None
+        @property
+        def entity_registry_enabled_default(self) -> bool:
+            return getattr(self, "_attr_entity_registry_enabled_default", True)
         async def async_added_to_hass(self): pass
         async def async_will_remove_from_hass(self): pass
         def async_write_ha_state(self): pass
@@ -241,6 +244,28 @@ def _ensure_ha_stubs():
     device_registry_mod = ModuleType("homeassistant.helpers.device_registry")
     device_registry_mod.DeviceInfo = DeviceInfo
 
+    entity_registry_mod = ModuleType("homeassistant.helpers.entity_registry")
+    class RegistryEntryDisabler:
+        INTEGRATION = "integration"
+        USER = "user"
+    entity_registry_mod.RegistryEntryDisabler = RegistryEntryDisabler
+
+    class RegistryEntry:
+        def __init__(self, entity_id, unique_id, disabled_by=None):
+            self.entity_id = entity_id
+            self.unique_id = unique_id
+            self.disabled_by = disabled_by
+    entity_registry_mod.RegistryEntry = RegistryEntry
+
+    class EntityRegistry:
+        def __init__(self):
+            self.entities = {}
+        def async_update_entity(self, entity_id, disabled_by=None):
+            if entity_id in self.entities:
+                self.entities[entity_id].disabled_by = disabled_by
+    entity_registry_mod.EntityRegistry = EntityRegistry
+    entity_registry_mod.async_get = lambda hass: getattr(hass, "_entity_registry", None) or EntityRegistry()
+
     class StaticPathConfig:
         def __init__(self, path, url_path, cache_headers=True):
             self.path = path
@@ -257,6 +282,7 @@ def _ensure_ha_stubs():
         "homeassistant.helpers": helpers_mod,
         "homeassistant.helpers.entity": entity_mod,
         "homeassistant.helpers.device_registry": device_registry_mod,
+        "homeassistant.helpers.entity_registry": entity_registry_mod,
         "homeassistant.helpers.entity_platform": entity_platform_mod,
         "homeassistant.helpers.update_coordinator": update_coordinator_mod,
         "homeassistant.helpers.aiohttp_client": aiohttp_client_mod,
@@ -276,6 +302,37 @@ def _ensure_ha_stubs():
         sys.modules[name] = mod
 
 _ensure_ha_stubs()
+
+def _ensure_entity_registry():
+    if "homeassistant.helpers.entity_registry" not in sys.modules:
+        from types import ModuleType
+        entity_registry_mod = ModuleType("homeassistant.helpers.entity_registry")
+        class RegistryEntryDisabler:
+            INTEGRATION = "integration"
+            USER = "user"
+        entity_registry_mod.RegistryEntryDisabler = RegistryEntryDisabler
+
+        class RegistryEntry:
+            def __init__(self, entity_id, unique_id, disabled_by=None):
+                self.entity_id = entity_id
+                self.unique_id = unique_id
+                self.disabled_by = disabled_by
+        entity_registry_mod.RegistryEntry = RegistryEntry
+
+        class EntityRegistry:
+            def __init__(self):
+                self.entities = {}
+            def async_update_entity(self, entity_id, disabled_by=None):
+                if entity_id in self.entities:
+                    self.entities[entity_id].disabled_by = disabled_by
+        entity_registry_mod.EntityRegistry = EntityRegistry
+        entity_registry_mod.async_get = lambda hass: getattr(hass, "_entity_registry", None) or EntityRegistry()
+
+        sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+        if "homeassistant.helpers" in sys.modules:
+            setattr(sys.modules["homeassistant.helpers"], "entity_registry", entity_registry_mod)
+
+_ensure_entity_registry()
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -660,3 +717,70 @@ def test_diagnostics_redact():
     assert redacted["nested"]["token"] == "**REDACTED**"
     assert redacted["nested"]["device"] == "PIT7WF"
     assert redacted["other"] == "normal_val"
+
+
+# --- v1.1.0 Entity Tests ---
+
+def test_unlock_buttons_disabled_by_default(mock_coordinator):
+    """Test AveVideo44UnlockButton has _attr_entity_registry_enabled_default is False while call buttons remain enabled."""
+    unlock_1 = AveVideo44UnlockButton(mock_coordinator, 9991, lock_id=1)
+    unlock_2 = AveVideo44UnlockButton(mock_coordinator, 9991, lock_id=2)
+    assert unlock_1._attr_entity_registry_enabled_default is False
+    assert unlock_2._attr_entity_registry_enabled_default is False
+
+    call_btn = AveVideo44CallButton(mock_coordinator, 9991)
+    answer_btn = AveVideo44AnswerButton(mock_coordinator, 9991)
+    hangup_btn = AveVideo44HangupButton(mock_coordinator, 9991)
+    assert getattr(call_btn, "_attr_entity_registry_enabled_default", True) is True
+    assert getattr(answer_btn, "_attr_entity_registry_enabled_default", True) is True
+    assert getattr(hangup_btn, "_attr_entity_registry_enabled_default", True) is True
+
+
+@pytest.mark.asyncio
+async def test_async_disable_duplicate_unlock_buttons(mock_hass, mock_entry):
+    """Test _async_disable_duplicate_unlock_buttons disables unlock buttons if not already disabled."""
+    import homeassistant.helpers.entity_registry as er
+    from custom_components.ave_video44 import _async_disable_duplicate_unlock_buttons
+
+    registry = er.EntityRegistry()
+    mock_hass._entity_registry = registry
+
+    # Add entries
+    btn_ped = er.RegistryEntry("button.ped", f"{mock_entry.entry_id}_9991_btn_unlock_1", disabled_by=None)
+    btn_gate = er.RegistryEntry("button.gate", f"{mock_entry.entry_id}_9991_btn_unlock_2", disabled_by=None)
+    btn_call = er.RegistryEntry("button.call", f"{mock_entry.entry_id}_9991_btn_call", disabled_by=None)
+    btn_user_dis = er.RegistryEntry("button.other", f"{mock_entry.entry_id}_9991_btn_unlock_1_other", disabled_by=er.RegistryEntryDisabler.USER)
+
+    registry.entities = {
+        "button.ped": btn_ped,
+        "button.gate": btn_gate,
+        "button.call": btn_call,
+        "button.other": btn_user_dis,
+    }
+
+    await _async_disable_duplicate_unlock_buttons(mock_hass, mock_entry)
+
+    assert btn_ped.disabled_by == er.RegistryEntryDisabler.INTEGRATION
+    assert btn_gate.disabled_by == er.RegistryEntryDisabler.INTEGRATION
+    assert btn_call.disabled_by is None
+    assert btn_user_dis.disabled_by == er.RegistryEntryDisabler.USER
+
+
+def test_intercom_target_select_options_and_selection(mock_coordinator):
+    """Test AveVideo44IntercomTargetSelect default placeholder and dynamic options."""
+    # When intercom_book is empty
+    mock_coordinator.intercom_book = {}
+    mock_coordinator.selected_intercom_targets = {}
+    select = AveVideo44IntercomTargetSelect(mock_coordinator, 9991)
+
+    assert select.options == ["Nessun interfono configurato"]
+    assert select.current_option == "Nessun interfono configurato"
+    assert select.selected_room_code == ""
+
+    # When intercom_book is populated
+    mock_coordinator.intercom_book = {"0101": "Interno 1", "0102": "Taverna"}
+    select._init_options()
+    assert select.options == ["0101 (Interno 1)", "0102 (Taverna)"]
+    assert select.current_option == "0101 (Interno 1)"
+    assert select.selected_room_code == "0101"
+

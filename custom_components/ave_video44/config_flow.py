@@ -238,16 +238,105 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> config_entries.ConfigFlowResult:
-        """Manage user options."""
+        """Manage user options or route to guided actions."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            if "action" not in user_input:
+                return self.async_create_entry(title="", data=user_input)
+            action = user_input["action"]
+            if action == "add_intercom":
+                return await self.async_step_add_intercom()
+            if action == "remove_intercom":
+                return await self.async_step_remove_intercom()
+            if action == "settings":
+                return await self.async_step_settings()
 
-        entry = self.config_entry
-        options = entry.options if entry else {}
-        current_book = options.get(
-            CONF_INTERCOM_BOOK,
-            DEFAULT_INTERCOM_BOOK,
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Required("action", default="settings"): vol.In({
+                    "add_intercom": "Aggiungi interno alla rubrica",
+                    "remove_intercom": "Rimuovi interno dalla rubrica",
+                    "settings": "Impostazioni generali",
+                }),
+            }),
         )
+
+    async def async_step_add_intercom(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> config_entries.ConfigFlowResult:
+        """Add an intercom contact to the phonebook."""
+        if user_input is not None:
+            code = user_input.get("intercom_code", "").strip()
+            name = user_input.get("intercom_name", "").strip()
+            options = dict(self.config_entry.options) if self.config_entry else {}
+            current_raw = options.get(CONF_INTERCOM_BOOK, DEFAULT_INTERCOM_BOOK) or ""
+            contacts = []
+            for item in current_raw.split(","):
+                item = item.strip()
+                if "=" in item:
+                    c, n = item.split("=", 1)
+                    if c.strip() != code:
+                        contacts.append((c.strip(), n.strip()))
+            contacts.append((code, name))
+            options[CONF_INTERCOM_BOOK] = ", ".join(f"{c}={n}" for c, n in contacts)
+            return self.async_create_entry(title="", data=options)
+
+        return self.async_show_form(
+            step_id="add_intercom",
+            data_schema=vol.Schema({
+                vol.Required("intercom_code"): str,
+                vol.Required("intercom_name"): str,
+            }),
+        )
+
+    async def async_step_remove_intercom(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> config_entries.ConfigFlowResult:
+        """Remove an intercom contact from the phonebook."""
+        options = dict(self.config_entry.options) if self.config_entry else {}
+        current_raw = options.get(CONF_INTERCOM_BOOK, DEFAULT_INTERCOM_BOOK) or ""
+        contacts_dict = {}
+        for item in current_raw.split(","):
+            item = item.strip()
+            if "=" in item:
+                c, n = item.split("=", 1)
+                contacts_dict[c.strip()] = f"{c.strip()} ({n.strip()})"
+
+        if user_input is not None:
+            remove_code = user_input.get("remove_code", "").strip()
+            contacts = []
+            for item in current_raw.split(","):
+                item = item.strip()
+                if "=" in item:
+                    c, n = item.split("=", 1)
+                    if c.strip() != remove_code:
+                        contacts.append((c.strip(), n.strip()))
+            options[CONF_INTERCOM_BOOK] = ", ".join(f"{c}={n}" for c, n in contacts)
+            return self.async_create_entry(title="", data=options)
+
+        schema = vol.Schema({
+            vol.Required("remove_code"): vol.In(contacts_dict if contacts_dict else {"": "Nessun interno presente"}),
+        })
+        return self.async_show_form(step_id="remove_intercom", data_schema=schema)
+
+    async def async_step_settings(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> config_entries.ConfigFlowResult:
+        """Manage general integration settings preserving phonebook."""
+        entry = self.config_entry
+        options = dict(entry.options) if entry else {}
+
+        if user_input is not None:
+            options[CONF_UNLOCK_PULSE_DURATION] = user_input.get(
+                CONF_UNLOCK_PULSE_DURATION,
+                options.get(CONF_UNLOCK_PULSE_DURATION, DEFAULT_UNLOCK_PULSE_DURATION),
+            )
+            options[CONF_PREFERRED_VIDEO_STREAM] = user_input.get(
+                CONF_PREFERRED_VIDEO_STREAM,
+                options.get(CONF_PREFERRED_VIDEO_STREAM, DEFAULT_PREFERRED_VIDEO_STREAM),
+            )
+            return self.async_create_entry(title="", data=options)
+
         current_pulse = options.get(
             CONF_UNLOCK_PULSE_DURATION, DEFAULT_UNLOCK_PULSE_DURATION
         )
@@ -256,9 +345,8 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
         )
 
         return self.async_show_form(
-            step_id="init",
+            step_id="settings",
             data_schema=vol.Schema({
-                vol.Optional(CONF_INTERCOM_BOOK, default=current_book): str,
                 vol.Optional(
                     CONF_UNLOCK_PULSE_DURATION, default=current_pulse
                 ): int,

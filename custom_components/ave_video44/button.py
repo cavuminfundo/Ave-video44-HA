@@ -39,6 +39,8 @@ async def async_setup_entry(
 class AveVideo44UnlockButton(AveVideo44BaseEntity, ButtonEntity):
     """Button to unlock pedestrian or gate."""
 
+    _attr_entity_registry_enabled_default = False
+
     def __init__(
         self,
         coordinator: AveVideo44Coordinator,

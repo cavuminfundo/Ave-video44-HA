@@ -44,9 +44,33 @@
     "step": {
       "init": {
         "title": "Opzioni AVE Video V44",
-        "description": "Configura la rubrica interfono e i parametri operativi.",
+        "description": "Seleziona un'operazione per configurare la rubrica interfono o i parametri operativi.",
         "data": {
+          "action": "Azione",
           "intercom_book": "Rubrica Interni (formato: codice=Nome, ...)",
+          "unlock_pulse_duration": "Durata impulso apertura (secondi)",
+          "preferred_video_stream": "Flusso video preferito"
+        }
+      },
+      "add_intercom": {
+        "title": "Aggiungi Interno alla Rubrica",
+        "description": "Inserisci il codice stanza AVE e il nome dell'interno.",
+        "data": {
+          "intercom_code": "Codice Interno (es. 0101)",
+          "intercom_name": "Nome Interno (es. Taverna)"
+        }
+      },
+      "remove_intercom": {
+        "title": "Rimuovi Interno dalla Rubrica",
+        "description": "Seleziona l'interno da eliminare dalla rubrica.",
+        "data": {
+          "remove_code": "Interno da Rimuovere"
+        }
+      },
+      "settings": {
+        "title": "Impostazioni Generali",
+        "description": "Configura la durata dell'impulso di apertura e la qualità streaming video.",
+        "data": {
           "unlock_pulse_duration": "Durata impulso apertura (secondi)",
           "preferred_video_stream": "Flusso video preferito"
         }
