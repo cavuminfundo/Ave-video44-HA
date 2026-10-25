@@ -1,5 +1,4 @@
-"""Camera platform for AVE Video V44 RTSP stream."""
-
+import asyncio
 import logging
 from typing import Any
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -47,8 +46,11 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
 
     @property
     def supported_features(self) -> CameraEntityFeature:
-        """Return supported features. Stream only if an RTSP URL is available."""
-        if self.coordinator.get_rtsp_url(self.device_id) is not None:
+        """Return supported features. Stream if RTSP URL is available or Cloud SIP session active."""
+        if (
+            self.coordinator.get_rtsp_url(self.device_id) is not None
+            or str(self.device_id) in getattr(self.coordinator, "cloud_sip_sessions", {})
+        ):
             return CameraEntityFeature.STREAM
         try:
             return CameraEntityFeature(0)
@@ -68,6 +70,11 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
+        if hasattr(self.coordinator, "async_get_camera_frame"):
+            sip_frame = await self.coordinator.async_get_camera_frame(self.device_id, timeout=6.0)
+            if sip_frame:
+                return sip_frame
+
         url = await self.stream_source()
         if not url:
             return None
@@ -83,7 +90,51 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
     async def handle_async_mjpeg_stream(
         self, request: Any
     ) -> Any:
-        """Serve live MJPEG stream converted from RTSP via FFmpeg."""
+        """Serve live MJPEG stream from Cloud SIP session or RTSP via FFmpeg."""
+        sessions = getattr(self.coordinator, "cloud_sip_sessions", {})
+        if str(self.device_id) in sessions:
+            session = sessions[str(self.device_id)]
+            frame = await session.wait_for_first_frame(timeout=8.0)
+            if frame is not None:
+                try:
+                    from aiohttp import web
+                    response = web.StreamResponse(
+                        status=200,
+                        reason="OK",
+                        headers={
+                            "Content-Type": "multipart/x-mixed-replace;boundary=--frame",
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                        },
+                    )
+                    await response.prepare(request)
+                    part = (
+                        b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                        + str(len(frame)).encode()
+                        + b"\r\n\r\n"
+                        + frame
+                        + b"\r\n"
+                    )
+                    await response.write(part)
+                    await response.write(part)
+
+                    last_seq = session.frame_seq
+                    while session.is_active:
+                        last_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.6)
+                        if new_frame:
+                            p = (
+                                b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                + str(len(new_frame)).encode()
+                                + b"\r\n\r\n"
+                                + new_frame
+                                + b"\r\n"
+                            )
+                            await response.write(p)
+                    return response
+                except (ConnectionResetError, asyncio.CancelledError):
+                    return response
+                except Exception as stream_err:
+                    _LOGGER.debug("Cloud SIP MJPEG stream error: %s", stream_err)
+
         url = await self.stream_source()
         if not url:
             return None

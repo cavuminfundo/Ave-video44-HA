@@ -5,7 +5,12 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 import paho.mqtt.client as mqtt
 
-from ..const import DEFAULT_MQTT_HOST, DEFAULT_MQTT_PORT
+from ..const import (
+    DEFAULT_MQTT_HOST,
+    DEFAULT_MQTT_PORT,
+    DEFAULT_MQTT_USER,
+    DEFAULT_MQTT_PASS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,12 +26,16 @@ class AveMqttListener:
         device_ids: Optional[List[str]] = None,
         on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         use_tls: bool = True,
+        home_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
     ) -> None:
         self._session_id = session_id
         self._broker_host = broker_host
         self._broker_port = broker_port
         self._device_ids = list(device_ids or [])
         self._use_tls = use_tls
+        self._home_id = str(home_id) if home_id is not None else None
+        self._user_id = str(user_id) if user_id is not None else None
         self._callbacks: List[Callable[[str, Dict[str, Any]], None]] = []
         if on_event:
             self._callbacks.append(on_event)
@@ -55,7 +64,10 @@ class AveMqttListener:
         if self._use_tls:
             client.tls_set()
 
-        client.username_pw_set(username=self._session_id, password=self._session_id)
+        if self._home_id:
+            client.username_pw_set(username=DEFAULT_MQTT_USER, password=DEFAULT_MQTT_PASS)
+        else:
+            client.username_pw_set(username=self._session_id, password=self._session_id)
         client.on_connect = self._on_connect
         client.on_message = self._on_message
         client.on_disconnect = self._on_disconnect
@@ -65,6 +77,9 @@ class AveMqttListener:
         """Subscribe to device and broadcast topics on successful connection."""
         _LOGGER.debug("Connected to AVE MQTT broker, subscribing to topics")
         client.subscribe("smarthome/device/status", qos=1)
+        if self._home_id:
+            client.subscribe(f"smarthome/device/{self._home_id}", qos=1)
+            client.subscribe(f"smarthome/device/status/{self._home_id}", qos=1)
         for dev_id in self._device_ids:
             client.subscribe(f"smarthome/device/{dev_id}", qos=1)
 

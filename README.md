@@ -59,7 +59,7 @@ Home Assistant custom integration for AVE Video V44 video intercom systems (VI2F
 
 ### Caratteristiche Principali
 
-- Video Streaming RTSP / RTSPS: visualizzazione live H.264/RTSPS (porta 8322) del posto esterno con proxy FFmpeg integrato per snapshot e flussi live, pienamente compatibile con WebRTC e go2rtc.
+- Video Streaming RTSP / RTSPS / Cloud SIP: visualizzazione live H.264/RTSPS (porta 8322) e Cloud SIP/SRTP (porta 5060) del posto esterno con proxy FFmpeg integrato per snapshot e flussi live, pienamente compatibile con WebRTC e go2rtc.
 - Risveglio Telecamera On-Demand: accensione e visualizzazione su richiesta della telecamera dei posti esterni a 2 fili (normalmente a riposo per risparmio energetico) tramite pulsante dedicato o pulsante "Attiva Video" nella card.
 - Controllo Serrature: apertura impulsiva di cancelletto pedonale (Lock ID 1) e cancello carraio (Lock ID 2).
 - Audio Bidirezionale Full-Duplex: conversazione vocale fluida direttamente dall'app Home Assistant Companion o dal browser via WebSocket, senza necessita di app terze.
@@ -121,7 +121,7 @@ Questo popola dinamicamente il selettore `select.rubrica_interni` (con auto-seed
 
 ### Card Lovelace (ave-video44-card)
 
-La card personalizzata viene registrata automaticamente all'avvio di Home Assistant come modulo JavaScript nel registro risorse Lovelace tramite il percorso anti-cache `/ave_video44_card/ave-video44-card.js?v=1.2.0`, senza richiedere interventi manuali alle Risorse Lovelace (Zero-YAML).
+La card personalizzata viene registrata automaticamente all'avvio di Home Assistant come modulo JavaScript nel registro risorse Lovelace tramite il percorso anti-cache `/ave_video44_card/ave-video44-card.js?v=1.2.2`, senza richiedere interventi manuali alle Risorse Lovelace (Zero-YAML).
 
 Per aggiungere la card a qualsiasi plancia tramite editor visuale (Zero-YAML):
 1. In qualsiasi dashboard Lovelace, cliccare sul menu in alto a destra (tre puntini) -> **Modifica Plancia**.
@@ -168,7 +168,7 @@ Il template di automazione e incluso in `custom_components/ave_video44/blueprint
 
 ### Key Features
 
-- Live RTSP / RTSPS Video Streaming: 25-30 fps H.264/RTSPS live cloud stream (port 8322) with FFmpeg snapshot proxy, fully compatible with WebRTC and go2rtc.
+- Live RTSP / RTSPS / Cloud SIP Video Streaming: 25-30 fps H.264/RTSPS live cloud stream (port 8322) and Cloud SIP/SRTP (port 5060) with FFmpeg snapshot proxy, fully compatible with WebRTC and go2rtc.
 - On-Demand Camera Wake: power up and view 2-wire outdoor doorstation cameras on demand (normally powered off when idle to conserve energy) using a dedicated wake button entity or "Attiva Video" card control.
 - Dual-Lock Actuation: pulse activation for pedestrian gate (Lock ID 1) and driveway sliding gate (Lock ID 2).
 - Full-Duplex Bidirectional Audio: live voice call through Home Assistant Companion app or web browser over authenticated WebSocket, without proprietary third-party apps.
@@ -230,7 +230,7 @@ This dynamically populates `select.rubrica_interni` (with automatic startup seed
 
 ### Lovelace Card (ave-video44-card)
 
-The bundled custom card is registered automatically on Home Assistant startup inside the Lovelace storage resource registry via the dedicated cache-bypass path `/ave_video44_card/ave-video44-card.js?v=1.2.0` (res_type: "module"), eliminating stale cache issues in mobile apps (Zero-YAML).
+The bundled custom card is registered automatically on Home Assistant startup inside the Lovelace storage resource registry via the dedicated cache-bypass path `/ave_video44_card/ave-video44-card.js?v=1.2.2` (res_type: "module"), eliminating stale cache issues in mobile apps (Zero-YAML).
 
 To add the card to any dashboard using the visual UI editor:
 1. In any Lovelace dashboard, click the top-right menu (three dots) -> **Edit Dashboard**.

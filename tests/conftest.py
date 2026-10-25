@@ -310,3 +310,67 @@ def mock_aiohttp_session():
     session.get = MagicMock()
     session.close = AsyncMock()
     return session
+
+
+@pytest.fixture
+def mock_hass():
+    from homeassistant.core import HomeAssistant
+    hass = HomeAssistant()
+    hass.bus.async_fire = MagicMock()
+    hass.services.async_register = MagicMock()
+    hass.loop = MagicMock()
+    hass.loop.call_soon_threadsafe = lambda func, *args: func(*args)
+    return hass
+
+
+@pytest.fixture
+def mock_entry():
+    from homeassistant.config_entries import ConfigEntry
+    from custom_components.ave_video44.const import (
+        CONF_ACCOUNT,
+        CONF_INTERCOM_BOOK,
+        CONF_PASSWORD,
+        CONF_UNLOCK_PULSE_DURATION,
+    )
+    return ConfigEntry(
+        entry_id="test_entry_id",
+        data={CONF_ACCOUNT: "test@example.com", CONF_PASSWORD: "secret_password", "home_id": 101},
+        options={
+            CONF_INTERCOM_BOOK: "1-1-101=Piano Terra, 1-1-102=Primo Piano, 1-1-103=Cugino",
+            CONF_UNLOCK_PULSE_DURATION: 2,
+        },
+        unique_id="ave_101",
+    )
+
+
+@pytest.fixture
+def mock_coordinator(mock_hass, mock_entry):
+    from custom_components.ave_video44.coordinator import AveVideo44Coordinator
+    coord = AveVideo44Coordinator(mock_hass, mock_entry)
+    coord.api = MagicMock()
+    coord.api.unlock = AsyncMock(return_value=True)
+    coord.api.control_monitoring = AsyncMock(return_value=123)
+    coord.api.async_close = AsyncMock()
+    coord.sip_session = MagicMock()
+    async def _mock_close():
+        coord.sip_session.is_closed = True
+    coord.sip_session.async_close = AsyncMock(side_effect=_mock_close)
+    coord.sip_session.send_pcm16_frame = MagicMock()
+    coord.sip_session.set_rx_pcm16_callback = MagicMock()
+    coord.sip_session.add_rx_pcm16_callback = MagicMock()
+    coord.sip_session.remove_rx_pcm16_callback = MagicMock()
+    coord.sip_session.build_housetohouse_invite = MagicMock(return_value=b"INVITE sip:1-1-103 SIP/2.0")
+    coord.sip_session.build_unlock_info = MagicMock(return_value=b"INFO sip:1-1-103 SIP/2.0")
+    coord.sip_session.is_closed = False
+    coord.devices = [
+        {
+            "deviceId": 9991,
+            "deviceName": "Posto Interno TS-SMART",
+            "deviceModel": "TS-SMART",
+            "isOnline": 1,
+            "ip": "192.168.1.100",
+            "mac": "AA:BB:CC:DD:EE:01",
+            "serialNumber": "SN9991",
+        }
+    ]
+    return coord

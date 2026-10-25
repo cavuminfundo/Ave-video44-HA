@@ -25,9 +25,10 @@ The `ave_video44` integration implements a hybrid architecture combining cloud e
 │  │  ┌──────┴───────────────────────┴──────────────────────┴──────┐  │  │
 │  │  │ Core Engine (core/)                                        │  │  │
 │  │  │ - api.py: REST HTTPS (HMAC-SHA1 signing, session reuse)    │  │  │
-│  │  │ - mqtt.py: TLS MQTTS Push Listener (:8883)                 │  │  │
+│  │  │ - mqtt.py: TLS MQTTS Push Listener (:18883)                │  │  │
 │  │  │ - protocol.py: GVS UDP 8300 Binary Framing Engine          │  │  │
-│  │  │ - sip_session.py: SIP Signaling & RTP PCMA Audio Bridge    │  │  │
+│  │  │ - cloud_sip.py: Cloud SIP + SRTP H.264 Video Engine        │  │  │
+│  │  │ - sip_session.py: Local SIP 2.0 Signaling & RTP Bridge     │  │  │
 │  │  └──────────────────────────────┬─────────────────────────────┘  │  │
 │  │                                 │                                │  │
 │  │  ┌──────────────────────────────┴─────────────────────────────┐  │  │
@@ -36,7 +37,7 @@ The `ave_video44` integration implements a hybrid architecture combining cloud e
 │  │  └────────────────────────────────────────────────────────────┘  │  │
 │  └──────────────────────────┬──────────────────────────────┬────────┘  │
 │                             │                              │           │
-│                             │ WebSocket PCM16              │           │
+│                             │ WebSocket PCM16 / MJPEG      │           │
 │                             ▼                              │           │
 │  ┌──────────────────────────────────────────────────┐      │           │
 │  │ Frontend: ave-video44-card.js (Lovelace Card)    │      │           │
@@ -47,8 +48,8 @@ The `ave_video44` integration implements a hybrid architecture combining cloud e
 │  └──────────────────────────────────────────────────┘      │           │
 └─────────────────────────────┼──────────────────────────────┼───────────┘
                               │                              │
-       HTTPS / MQTTS :8883    │                              │ UDP 8300 / SIP :5060 / RTSP :554
-       (Cloud Push & REST)    │                              │ (Local LAN Control & Media)
+       HTTPS / MQTTS :18883   │                              │ UDP 8300 / Cloud SIP :5060 / SRTP
+       (Cloud Push & REST)    │                              │ (Local LAN Control & Cloud Media)
                               ▼                              ▼
 ┌──────────────────────────────────────┐  ┌──────────────────────────────┐
 │          AVE / GVS Cloud             │  │   Local LAN Intercom Bus     │
@@ -68,7 +69,7 @@ custom_components/ave_video44/
 ├── config_flow.py             ← UI setup flow (Password SHA256 & OTP) and guided OptionsFlow wizard
 ├── coordinator.py             ← DataUpdateCoordinator managing polling & MQTT dispatching
 ├── entity.py                  ← Base entity classes with common DeviceInfo bindings
-├── camera.py                  ← RTSP H.264 camera entity with snapshot preview
+├── camera.py                  ← Camera entity with instant MJPEG streaming & snapshot preview
 ├── lock.py                    ← Lock entities (pedestrian & driveway) with auto-relock
 ├── button.py                  ← Instant pulse unlock action buttons (disabled by default)
 ├── event.py                   ← Doorbell call events (doorbell_press, answered, missed)
@@ -81,9 +82,10 @@ custom_components/ave_video44/
 ├── core/
 │   ├── __init__.py            ← Core module namespace
 │   ├── api.py                 ← Async REST client with HMAC-SHA1 request signing
-│   ├── mqtt.py                ← Async MQTTS client listening on eu.emqx.gvs-icloud.com:8883
+│   ├── mqtt.py                ← Async MQTTS client listening on eu.emqx.gvs-icloud.com:18883
 │   ├── protocol.py            ← GVS binary protocol framing (magic header GVSGVS\xa5\xa5\xa5\xa5)
-│   └── sip_session.py         ← SIP 2.0 user agent & RTP PCMA / PCM16 audio bridge
+│   ├── sip_session.py         ← Local SIP 2.0 user agent & RTP PCMA audio bridge
+│   └── cloud_sip.py           ← Cloud SIP + SRTP H.264 Video Engine (CloudSipMediaSession)
 ├── frontend/
 │   ├── ave-video44-card.js    ← Custom Lovelace card with WebAudio 8kHz resampling & visual editor
 │   └── card_loader.py         ← Automatic Lovelace resource registration handler (add_extra_js_url)
@@ -109,10 +111,12 @@ custom_components/ave_video44/
 - **Payload Normalization**: Unpacks device rosters, SIP credentials, RTSP video URLs, and relays unlock commands (`unlockV2`).
 
 ### 3.2 MQTT Push Listener (`core/mqtt.py`)
-- **Transport**: Persistent TLS connection to `eu.emqx.gvs-icloud.com:8883`.
+- **Transport**: Persistent TLS connection to `eu.emqx.gvs-icloud.com:18883`.
 - **Subscribed Topics**:
   - `smarthome/device/status` (Broadcast system state events)
   - `smarthome/device/{deviceId}` (Per-device doorbell ring and lock feedback events)
+  - `smarthome/device/{homeId}` (Plant-level device state transitions)
+  - `smarthome/device/status/{homeId}` (Plant-level broadcast events)
 - **Event Correlator**: Maps raw payload actions (`monitoring` action `1` = ring, `0` = idle) to integration call state transitions.
 
 ### 3.3 GVS Protocol Engine (`core/protocol.py`)
@@ -122,11 +126,17 @@ custom_components/ave_video44/
   - `TALKBACK_FUNCTION = 3`: Call initiation, answering, and status queries.
   - `ENTRANCEGUARD_FUNCTION = 4`: Lock control and access events.
 
-### 3.4 SIP Session & Audio Bridge (`core/sip_session.py`)
-- **Signaling**: SIP 2.0 over UDP/TCP port `5060`. Supports remote unlock via SIP `INFO` with `application/gvs_protocol+json` or DTMF.
-- **RTP Audio Bridge**:
-  - Downstream: Ingests RTP PCMA (G.711a, 8kHz, 8-bit A-law) on UDP `8302`, decodes to 16-bit mono PCM (PCM16 little-endian), and delivers binary frames to the WebSocket API.
-  - Upstream: Accepts 8kHz PCM16 binary chunks from WebSocket API, encodes to G.711a A-law, and transmits standard RTP packets (PT 8) to the intercom unit.
+### 3.4 Cloud SIP + SRTP Video Engine & Local Audio Bridge (`core/cloud_sip.py` & `core/sip_session.py`)
+- **2-Wire TS-SMART Architectural Discovery (`protocol="0"`)**:
+  - 2-wire indoor monitors (`VI2F-PIT7WF`, `TS-SMART7xx`, `TS-SMART10xx`) do not support RTSPS on port 8322. Live video streaming requires a direct Cloud SIP session.
+  - **Cloud SIP Signaling**: Operates on `eu.open-sips.gvs-icloud.com:5060` using standard SIP digest authentication combined with 14 proprietary GVS/AVE headers:
+    - Mandatory headers include `enableVideo: 1`, `proxyDeviceId`, `proxyFlag: 1`, `tenantUuid`, `appUuid`, `version`, `clientType`, and `targetCallId`.
+  - **SRTP Media Encryption**: Mandates secure RTP profile `RTP/SAVP` with cryptographic suite `AES_CM_128_HMAC_SHA1_80` negotiated via SDP `a=crypto:1 ...`.
+  - **Symmetric RTP NAT Hole-Punching**: Home Assistant transmits an initial probe packet from its local UDP port to the remote media server address/port negotiated in the `200 OK` SDP. This opens bi-directional pinholes in stateful NAT routers and firewalls, allowing incoming SRTP H.264 packets to flow in.
+  - **H.264 Depacketization & Transcoding**: Decrypts inbound SRTP packets, depacketizes RFC 6184 H.264 NAL units (supporting Single NAL, STAP-A, and FU-A fragmentation units), formats into Annex-B bitstream (`0x00000001` start codes), and pipes into FFmpeg (`image2pipe`) generating continuous low-latency JPEG frames.
+- **Local SIP Session & RTP PCMA Audio Bridge (`core/sip_session.py`)**:
+  - SIP 2.0 over UDP/TCP port `5060` for local LAN intercom units.
+  - Ingests RTP PCMA (G.711a, 8kHz, 8-bit A-law) on UDP `8302`, decodes to PCM16, and relays bi-directionally to the WebSocket API.
 
 ### 3.5 WebSocket Audio Bridge (`websocket_api.py`)
 - **`ave_video44/call_control`**: Commands for `answer`, `hangup`, `reject`, `unlock`, and `mute`.
@@ -138,7 +148,7 @@ custom_components/ave_video44/
 - Manages optimistic state transitions and dispatches event triggers for Home Assistant automations.
 
 ### 3.7 Entity Platforms
-- **`camera.py`**: Live RTSP / TLS RTSPS cloud stream (`rtsps://{user}:{pwd}@{domain}:8322/stream/1/{deviceId}/0/{targetNum}`) and local LAN RTSP stream with FFmpeg MJPEG proxy support (`-rtsp_transport tcp`) for snapshots and live streams. On 2-wire bus installations, returns `None` and disables `CameraEntityFeature.STREAM` when idle, activating only when an active RTSP/RTSPS stream URL is provisioned during a call or monitoring session.
+- **`camera.py`**: Delivers instant MJPEG streaming (`multipart/x-mixed-replace`) and still frames (`async_camera_image`) sourced from the active Cloud SIP/SRTP session (`CloudSipMediaSession`) or RTSP stream. On 2-wire installations, returns `None` and disables `CameraEntityFeature.STREAM` when idle, activating dynamically only during calls or active monitoring.
 - **`lock.py`**: Dual-lock control (`Lock 1` pedestrian, `Lock 2` driveway) with automated relock after `unlock_pulse_duration` (default: 2s).
 - **`button.py`**:
   - `button.*_attiva_telecamera` (`AveVideo44WakeCameraButton`): Enabled by default. Wakes 2-wire outdoor stations on demand via `POST /smarthome/api/device-monitoring/monitoring` (`action=1`), dynamically provisioning the RTSP stream URL and transitioning state to `monitoring`.

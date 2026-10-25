@@ -389,4 +389,51 @@ The integration offers an optional dedicated sidebar panel dashboard (`Videocito
 - **Dynamic Synchronization**: Handled in `__init__.py` via `_async_sync_sidebar_panel(hass, entry)`, creating or updating the panel registration in `.storage/lovelace_dashboards` and matching `show_in_sidebar`.
 - **Zero-YAML Layout**: The generated sidebar dashboard embeds `custom:ave-video44-card` configured with auto-resolved entities and constrained responsive width.
 
+---
+
+## 14. Cloud SIP + SRTP Video Engine (`CloudSipMediaSession`)
+
+### 14.1 2-Wire Hardware Video Protocol Discovery (`protocol="0"`)
+For 2-wire cloud installations (`TS-SMART` indoor monitors including `VI2F-PIT7WF`, `TS-SMART7xx`, and `TS-SMART10xx`), the cloud REST API reports `protocol="0"`. These units do not expose or proxy an RTSPS video stream on port 8322. Live video transmission requires initiating an authenticated SIP session directly with the AVE/GVS cloud SIP proxy:
+- **SIP Proxy Endpoint**: `eu.open-sips.gvs-icloud.com:5060` (UDP).
+- **Authentication**: Standard SIP digest challenge-response (`401 Unauthorized` / `407 Proxy Authentication Required`, MD5 hashing).
+
+### 14.2 Proprietary GVS/AVE 14 Custom SIP Headers
+To route the call to the unpowered 2-wire doorstation through the cloud registrar and wake the camera feed, the SIP `INVITE` must contain 14 proprietary headers:
+```
+enableVideo: 1
+proxyDeviceId: <indoor_monitor_deviceId>
+proxyFlag: 1
+tenantUuid: <tenantUuid>
+appUuid: <appUuid>
+version: 2.1.2
+clientType: 1
+targetCallId: <monitoring_or_ring_call_id>
+```
+- **Crucial Invariant**: Omission of `enableVideo: 1` causes the server to negotiate audio-only or immediately drop the dialog with `488 Not Acceptable Here`.
+
+### 14.3 Mandatory SRTP Media Encryption (`RTP/SAVP`)
+The media exchange mandates SRTP encryption for all video transport:
+- **SDP Crypto Offer**: `a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:<master_key_salt_30_bytes_base64>`
+- The media transport profile in SDP is declared strictly as `RTP/SAVP` with payload type `96` (`H264/90000`).
+- SRTP packets are decrypted via cryptographic contexts established with `pylibsrtp` and `cryptography`.
+
+### 14.4 Symmetric RTP NAT Hole-Punching
+Because Home Assistant typically resides behind home router NATs:
+1. `CloudSipMediaSession` binds a local ephemeral UDP port for video RTP.
+2. Upon receiving `200 OK` with remote media server IP and port, it immediately transmits an initial dummy probe packet from that local port to the remote media port.
+3. This creates a stateful NAT translation mapping in consumer routers, enabling the remote media server to deliver encrypted SRTP packets into Home Assistant without requiring manual port forwarding on the router.
+
+### 14.5 H.264 Annex-B Depacketization & FFmpeg MJPEG Pipe
+1. Inbound SRTP packets are decrypted and stripped of the 12-byte RTP header.
+2. Payload is parsed for RFC 6184 H.264 packet types:
+   - **Single NAL Unit**: Prefix with 4-byte Annex-B start code `0x00000001`.
+   - **STAP-A (Type 24)**: Unpack aggregated NAL units and prefix each with `0x00000001`.
+   - **FU-A (Type 28)**: Reconstruct fragmented NAL units across multiple RTP packets, prepending `0x00000001` upon encountering the start bit.
+3. The Annex-B elementary stream is piped to a long-running asynchronous FFmpeg worker:
+   ```bash
+   ffmpeg -f h264 -i pipe:0 -f image2pipe -vcodec mjpeg -q:v 3 pipe:1
+   ```
+4. Decoded JPEG frames are stored in an asynchronous memory buffer, providing zero-latency delivery to `AveVideo44Camera.async_camera_image` and `handle_async_mjpeg_stream`.
+
 

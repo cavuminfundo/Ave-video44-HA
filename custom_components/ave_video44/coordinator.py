@@ -19,7 +19,7 @@ from .const import (
 )
 from .core.api import AveCloudApi
 from .core.mqtt import AveMqttListener
-from .core.sip_session import AveSipSession
+from .core.sip_session import AveSipSession, CloudSipMediaSession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         )
 
         self.sip_session = AveSipSession()
+        self.cloud_sip_sessions: Dict[str, CloudSipMediaSession] = {}
         self.mqtt_listener: Optional[AveMqttListener] = None
 
         self.devices: List[Dict[str, Any]] = []
@@ -162,13 +163,69 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
     ) -> Optional[str]:
         """Wake outdoor camera / start live monitoring session."""
         _LOGGER.debug("Waking camera for device %s", device_id)
+        dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
         mon_num = monitoring_device_number
         if not mon_num:
-            dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
             if dev and isinstance(dev.get("extraConfig"), dict):
                 mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
             else:
                 mon_num = "1"
+
+        # Check for Cloud SIP session (TS-SMART 2-wire intercom)
+        intercom_info = dev.get("deviceIntercomInfo") if dev else None
+        target_sip_uri = None
+        if isinstance(intercom_info, dict):
+            u = intercom_info.get("username", "")
+            if str(u).startswith("sip:"):
+                target_sip_uri = str(u)
+        elif isinstance(intercom_info, list) and intercom_info:
+            for item in intercom_info:
+                if isinstance(item, dict):
+                    u = item.get("username", "")
+                    if str(u).startswith("sip:"):
+                        target_sip_uri = str(u)
+                        break
+
+        if target_sip_uri and self.api:
+            dev_str = str(device_id)
+            if dev_str in self.cloud_sip_sessions:
+                old_sess = self.cloud_sip_sessions.pop(dev_str)
+                try:
+                    await old_sess.async_stop()
+                except Exception:
+                    pass
+
+            try:
+                sip_acct = await self.api.get_sip_account(dev_str)
+                if isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password"):
+                    user_id = str(
+                        (dev.get("userId") if dev else None)
+                        or (dev.get("createUser") if dev else None)
+                        or (self.entry.data.get("user_id") if getattr(self, "entry", None) and getattr(self.entry, "data", None) else None)
+                        or "34964"
+                    )
+                    ffmpeg_bin = "ffmpeg"
+                    try:
+                        from homeassistant.components.ffmpeg import DATA_FFMPEG
+                        if hasattr(self, "hass") and self.hass and DATA_FFMPEG in self.hass.data:
+                            ffmpeg_bin = getattr(self.hass.data[DATA_FFMPEG], "binary", "ffmpeg")
+                    except Exception:
+                        pass
+
+                    session = CloudSipMediaSession(
+                        device_id=dev_str,
+                        sip_username=str(sip_acct["username"]),
+                        sip_password=str(sip_acct["password"]),
+                        target_sip_uri=target_sip_uri,
+                        user_id=user_id,
+                        target_device_num=str(mon_num or "1"),
+                        sender_name="Citofono",
+                        ffmpeg_binary=ffmpeg_bin,
+                    )
+                    self.cloud_sip_sessions[dev_str] = session
+                    await session.async_start()
+            except Exception as sip_err:
+                _LOGGER.debug("Could not start CloudSipMediaSession: %s", sip_err)
 
         call_id = None
         if self.api:
@@ -238,9 +295,26 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.async_update_listeners()
         return self.active_rtsp_url
 
+    async def async_get_camera_frame(
+        self, device_id: int | str, timeout: float = 6.0
+    ) -> Optional[bytes]:
+        """Get latest camera frame from active CloudSipMediaSession."""
+        session = self.cloud_sip_sessions.get(str(device_id))
+        if session and session.is_active:
+            return await session.wait_for_first_frame(timeout=timeout)
+        return None
+
     async def async_hangup_call(self, device_id: int | str) -> None:
         """Terminate active call or monitoring session."""
         _LOGGER.debug("Hanging up call/monitoring on device %s", device_id)
+        dev_str = str(device_id)
+        if dev_str in self.cloud_sip_sessions:
+            sess = self.cloud_sip_sessions.pop(dev_str)
+            try:
+                await sess.async_stop()
+            except Exception as err:
+                _LOGGER.debug("Error stopping CloudSipMediaSession on hangup: %s", err)
+
         if self.api and (self.call_state == "monitoring" or self.active_rtsp_url):
             dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
             mon_num = "1"
@@ -504,6 +578,13 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Disconnect MQTT client and close SIP transport."""
+        for sess in list(self.cloud_sip_sessions.values()):
+            try:
+                await sess.async_stop()
+            except Exception:
+                pass
+        self.cloud_sip_sessions.clear()
+
         if self.mqtt_listener:
             await self.mqtt_listener.async_stop()
             self.mqtt_listener = None

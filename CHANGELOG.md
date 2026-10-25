@@ -16,6 +16,34 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.2 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Cloud SIP + SRTP H.264 Video Engine (`CloudSipMediaSession`)**:
+  - Fixed live video streaming for 2-wire bus `TS-SMART` indoor monitors (`VI2F-PIT7WF`, `TS-SMART7xx`, `TS-SMART10xx`, `protocol="0"`), which do not support RTSPS on port 8322 but require authenticated SIP `INVITE` signaling to `eu.open-sips.gvs-icloud.com:5060`.
+  - Implemented the 14 proprietary GVS/AVE custom SIP headers, including mandatory `enableVideo: 1`, `proxyDeviceId`, and `proxyFlag: 1`.
+  - Mandatory SRTP negotiation (`RTP/SAVP` with `AES_CM_128_HMAC_SHA1_80` crypto attribute) for secure real-time media ingestion.
+  - Symmetric RTP NAT hole-punching: transmits initial probe packets to establish bi-directional firewall pinholes so the cloud media server can deliver inbound H.264 RTP packets to Home Assistant.
+  - Low-latency H.264 Annex-B depacketization and FFmpeg `image2pipe` transcoding directly into JPEG frames.
+- **Camera Entity Instant MJPEG & Still Frame**:
+  - `AveVideo44Camera` now delivers instant JPEG frames decoded directly from the active SIP/SRTP session for both live `multipart/x-mixed-replace` streaming in the Bubble Card and `async_camera_image` snapshot requests.
+- **MQTT TLS Port 18883 & Home Topic Subscriptions**:
+  - Updated cloud MQTTS connection to port `18883` and added subscriptions to plant-level topics `smarthome/device/{homeId}` and `smarthome/device/status/{homeId}` for reliable ring and monitoring state event delivery.
+
+### 🇮🇹 Italiano
+
+- **Cloud SIP + SRTP H.264 Video Engine (`CloudSipMediaSession`)**:
+  - Risolto lo streaming video sui videocitofoni 2 fili serie `TS-SMART` (`VI2F-PIT7WF`, `TS-SMART7xx`, `TS-SMART10xx`, `protocol="0"`), i quali non utilizzano RTSPS sulla porta `8322` ma richiedono una sessione SIP `INVITE` autenticata verso `eu.open-sips.gvs-icloud.com:5060`.
+  - Implementati i 14 header SIP proprietari GVS/AVE, incluso `enableVideo: 1` obbligatorio, `proxyDeviceId` e `proxyFlag: 1`.
+  - Negoziazione SRTP obbligatoria (`RTP/SAVP` con suite `AES_CM_128_HMAC_SHA1_80`) per l'acquisizione sicura dei flussi multimediali in tempo reale.
+  - NAT hole-punching RTP simmetrico: invio di pacchetti probe iniziali per aprire i varchi nei firewall stateful e router NAT, consentendo al media server cloud di instradare i pacchetti RTP H.264 verso Home Assistant.
+  - Depacketizzazione H.264 Annex-B e decodifica a bassissima latenza tramite FFmpeg `image2pipe` direttamente in frame JPEG continui.
+- **Camera Entity Instant MJPEG & Still Frame**:
+  - `AveVideo44Camera` serve ora istantaneamente i frame JPEG decodificati dalla sessione SIP/SRTP sia per lo streaming live `multipart/x-mixed-replace` nella Bubble Card sia per gli snapshot `async_camera_image`.
+- **Porta MQTT TLS 18883 e Sottoscrizioni Topic di Impianto**:
+  - Aggiornata la connessione MQTTS cloud sulla porta `18883` e introdotte le sottoscrizioni ai topic di impianto `smarthome/device/{homeId}` e `smarthome/device/status/{homeId}` per la ricezione tempestiva degli eventi di suoneria e monitoraggio.
+
 ## v1.2.1 — 2026-10-25
 
 ### 🇬🇧 English

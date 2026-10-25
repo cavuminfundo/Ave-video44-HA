@@ -128,6 +128,20 @@
 - Viewport State Coordination: Always guard image and video element visibility with an explicit `isVideoActive` check (`call_state !== "idle"`). Without this check, image error/load callbacks can hide `#videoPlaceholder`, leaving a blank black box instead of the standby background.
 - Direct Viewport Interaction: Providing a wake bubble button directly inside the idle `#videoPlaceholder` improves tactile usability by allowing users to tap the screen directly to start monitoring.
 
+---
+
+## 2026-10-25 — v1.2.2 Cloud SIP/SRTP H.264 Video Engine & MQTT Port 18883
+
+### 19. 2-Wire TS-SMART Cloud SIP Architecture (protocol="0")
+- Invariant: 2-wire indoor monitors (VI2F-PIT7WF, TS-SMART) reporting protocol="0" do not support RTSPS streaming on port 8322. Live video requires direct SIP INVITE signaling to eu.open-sips.gvs-icloud.com:5060.
+- Mandatory Custom Headers: The SIP INVITE must include all 14 proprietary GVS/AVE headers, specifically enableVideo: 1, proxyDeviceId, and proxyFlag: 1. Omitting enableVideo: 1 causes the server to negotiate audio-only or reject with 488.
+- SRTP & Symmetric NAT Hole-Punching: The media stream requires RTP/SAVP with AES_CM_128_HMAC_SHA1_80. Stateful NAT firewalls block incoming video packets unless an initial dummy probe packet is sent from the local UDP socket to the remote media endpoint upon 200 OK receipt.
+
+### 20. Cloud MQTTS Port 18883 & Plant-Level Topic Subscriptions
+- Port Invariant: The secure TLS port for the AVE/GVS EMQX broker is 18883.
+- Topic Hierarchy: In addition to device-specific topics (smarthome/device/{deviceId}), the integration must subscribe to plant-level topics smarthome/device/{homeId} and smarthome/device/status/{homeId} to guarantee event capture across all indoor monitors and doorstations.
+
+
 
 
 
