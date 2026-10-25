@@ -213,7 +213,7 @@ def _ensure_ha_stubs():
         def options(self):
             return self._attr_options
 
-    class CameraEntityFeature:
+    class CameraEntityFeature(int):
         STREAM = 1
 
     class Camera(Entity):
@@ -336,6 +336,7 @@ _ensure_entity_registry()
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.components.camera import CameraEntityFeature
 
 from custom_components.ave_video44.const import (
     CONF_ACCOUNT,
@@ -588,10 +589,49 @@ async def test_select_entity(mock_coordinator):
 async def test_camera_entity(mock_coordinator):
     """Test RTSP camera entity and stream source generation."""
     cam = AveVideo44Camera(mock_coordinator, device_id=9991)
-    mock_coordinator.get_rtsp_url = MagicMock(return_value="rtsp://192.168.1.100:554/live/sub")
 
+    # When device has IP configured in coordinator devices
+    mock_coordinator.devices = [{"deviceId": 9991, "ip": "192.168.1.50"}]
     url = await cam.stream_source()
-    assert url == "rtsp://192.168.1.100:554/live/sub"
+    assert url == "rtsp://192.168.1.50:554/live/sub"
+    assert cam.supported_features == CameraEntityFeature.STREAM
+    assert await cam.async_camera_image() is None
+
+    # When device has no IP (idle 2-wire camera)
+    mock_coordinator.devices = [{"deviceId": 9991}]
+    assert await cam.stream_source() is None
+    assert cam.supported_features == CameraEntityFeature(0)
+
+    # When get_rtsp_url is explicitly mocked
+    mock_coordinator.get_rtsp_url = MagicMock(return_value="rtsp://192.168.1.100:554/live/sub")
+    assert await cam.stream_source() == "rtsp://192.168.1.100:554/live/sub"
+    assert cam.supported_features == CameraEntityFeature.STREAM
+
+
+@pytest.mark.asyncio
+async def test_coordinator_get_rtsp_url(mock_coordinator):
+    """Test coordinator.get_rtsp_url logic."""
+    from custom_components.ave_video44.coordinator import AveVideo44Coordinator
+
+    # When device has no IP, should return None (never 127.0.0.1)
+    mock_coordinator.devices = [{"deviceId": "9991"}]
+    mock_coordinator.active_device_id = None
+    mock_coordinator.active_rtsp_url = None
+    assert AveVideo44Coordinator.get_rtsp_url(mock_coordinator, "9991") is None
+
+    # When device has IP configured
+    mock_coordinator.devices = [{"deviceId": "9991", "ip": "192.168.1.50"}]
+    assert AveVideo44Coordinator.get_rtsp_url(mock_coordinator, "9991") == "rtsp://192.168.1.50:554/live/sub"
+
+    # When localhost is set, should return None
+    mock_coordinator.devices = [{"deviceId": "9991", "ip": "127.0.0.1"}]
+    assert AveVideo44Coordinator.get_rtsp_url(mock_coordinator, "9991") is None
+
+    # When active_rtsp_url is set during active call
+    mock_coordinator.devices = [{"deviceId": "9991"}]
+    mock_coordinator.active_device_id = "9991"
+    mock_coordinator.active_rtsp_url = "rtsp://live.stream/test"
+    assert AveVideo44Coordinator.get_rtsp_url(mock_coordinator, "9991") == "rtsp://live.stream/test"
 
 
 # --- WebSocket API Tests ---

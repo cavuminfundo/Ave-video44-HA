@@ -43,8 +43,28 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self._attr_name = "Telecamera"
         self._attr_translation_key = "live_stream"
         self._attr_icon = "mdi:cctv"
-        self._attr_supported_features = CameraEntityFeature.STREAM
+
+    @property
+    def supported_features(self) -> CameraEntityFeature:
+        """Return supported features. Stream only if an RTSP URL is available."""
+        if self.coordinator.get_rtsp_url(self.device_id) is not None:
+            return CameraEntityFeature.STREAM
+        try:
+            return CameraEntityFeature(0)
+        except TypeError:
+            return 0  # type: ignore[return-value]
+
+    @supported_features.setter
+    def supported_features(self, value: CameraEntityFeature) -> None:
+        """Allow base class or tests to assign supported_features."""
+        self._attr_supported_features = value
 
     async def stream_source(self) -> str | None:
         """Return RTSP URL for live preview stream."""
         return self.coordinator.get_rtsp_url(self.device_id)
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Return bytes of camera image."""
+        return None

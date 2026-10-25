@@ -61,6 +61,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.last_ring_event: Optional[Dict[str, Any]] = None
         self.selected_intercom_targets: Dict[str, str] = {}
         self._ring_callbacks: List[Callable[[str, Dict[str, Any]], None]] = []
+        self.active_rtsp_url: Optional[str] = None
 
         self.intercom_book: Dict[str, str] = self._parse_intercom_book()
 
@@ -167,7 +168,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         if self.api:
             await self.api.unlock(device_id=str(device_id), lock_id=str(lock_id))
 
-    def get_rtsp_url(self, device_id: int | str) -> str:
+    def get_rtsp_url(self, device_id: int | str) -> Optional[str]:
         """Return RTSP streaming URL for requested monitor."""
         pref_stream = self.entry.options.get(
             "preferred_video_stream", DEFAULT_PREFERRED_VIDEO_STREAM
@@ -177,17 +178,21 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         for dev in self.devices:
             if str(dev.get("deviceId")) == str(device_id):
                 ip = dev.get("ip")
-                if ip:
+                if ip and ip not in ("127.0.0.1", "0.0.0.0", "localhost"):
                     return f"rtsp://{ip}:554/live/{stream_path}"
 
-        return f"rtsp://127.0.0.1:554/live/{stream_path}"
+        if self.active_rtsp_url and str(self.active_device_id) == str(device_id):
+            return self.active_rtsp_url
+
+        return None
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch updated device list and metadata from cloud API with auto-healing."""
         try:
+            account = self.config_entry.data.get(CONF_ACCOUNT) if self.config_entry else None
+            password = self.config_entry.data.get(CONF_PASSWORD) if self.config_entry else None
+
             if (not self.api.session_id and not self.api.token) or self.home_id in (None, 1, "1"):
-                account = self.config_entry.data.get(CONF_ACCOUNT) if self.config_entry else None
-                password = self.config_entry.data.get(CONF_PASSWORD) if self.config_entry else None
                 if account and password:
                     try:
                         login_data = await self.api.login_with_password(account, password)
@@ -212,6 +217,19 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
             home_id = self.home_id or (self.entry.data.get("home_id") if self.entry else None)
             devices = await self.api.get_devices(home_id=home_id)
+
+            if not devices and account and password:
+                try:
+                    login_data = await self.api.login_with_password(account, password)
+                    if self.config_entry and hasattr(self.hass, "config_entries") and hasattr(self.hass.config_entries, "async_update_entry"):
+                        new_data = dict(self.config_entry.data)
+                        new_data["token"] = self.api.token or login_data.get("token")
+                        new_data["session_id"] = self.api.session_id or login_data.get("sessionId")
+                        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+                    devices = await self.api.get_devices(home_id=home_id)
+                except Exception as err:
+                    _LOGGER.debug("Re-login attempt on empty devices failed: %s", err)
+
             if devices:
                 normalized_devices: List[Dict[str, Any]] = []
                 for d in devices:
@@ -221,8 +239,32 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     dev["deviceModel"] = dev.get("deviceModel") or dev.get("className") or "TS-SMART"
                     dev["firmwareVersion"] = dev.get("firmwareVersion") or dev.get("version") or "1.0"
                     dev["online"] = dev.get("online", True)
+                    dev["isOnline"] = 1 if dev.get("online", True) else 0
                     normalized_devices.append(dev)
                 self.devices = normalized_devices
+
+            if not self.devices:
+                try:
+                    from homeassistant.helpers import device_registry as dr
+                    dev_reg = dr.async_get(self.hass)
+                    entries = dr.async_entries_for_config_entry(dev_reg, self.entry_id)
+                    recovered: List[Dict[str, Any]] = []
+                    for dev_entry in entries:
+                        for ident_domain, ident_id in dev_entry.identifiers:
+                            if ident_domain == DOMAIN and ident_id:
+                                recovered.append({
+                                    "deviceId": str(ident_id),
+                                    "deviceName": dev_entry.name or dev_entry.original_name or "Unità interna AVE",
+                                    "deviceModel": dev_entry.model or "TS-SMART",
+                                    "firmwareVersion": dev_entry.sw_version or "1.0",
+                                    "online": True,
+                                    "isOnline": 1,
+                                })
+                    if recovered:
+                        self.devices = recovered
+                except Exception as dr_err:
+                    _LOGGER.debug("Device registry fallback check: %s", dr_err)
+
             return {str(d.get("deviceId")): d for d in self.devices}
         except Exception as err:
             raise UpdateFailed(f"Error fetching AVE devices: {err}") from err

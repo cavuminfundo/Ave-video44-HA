@@ -335,6 +335,52 @@ class AveCloudApi:
                 payload = self._extract_payload(resp_data)
                 return dict(payload) if isinstance(payload, dict) else {}
 
+    async def get_monitoring_list(self, device_id: str | int) -> List[Dict[str, Any]]:
+        """Fetch indoor monitor camera/monitoring device list."""
+        session = await self._get_session()
+        url = f"{self._base_url}/smarthome/api/device/indoor/monitoring-list"
+        params = self._signed_query({"deviceId": str(device_id)})
+        headers = self._headers()
+        async with asyncio.timeout(10.0):
+            async with session.get(url, params=params, headers=headers) as resp:
+                self._capture_cookies(resp)
+                resp_data = await resp.json()
+                payload = self._extract_payload(resp_data)
+                if isinstance(payload, list):
+                    return payload
+                if isinstance(payload, dict):
+                    return payload.get("list", payload.get("records", []))
+                return []
+
+    async def control_monitoring(
+        self,
+        device_id: str | int,
+        monitoring_device_number: str = "001",
+        action: int = 1,
+        resolution_level: int = 0,
+    ) -> Optional[str]:
+        """Start (action=1) or stop (action=0) live video monitoring stream."""
+        session = await self._get_session()
+        url = f"{self._base_url}/smarthome/api/device-monitoring/monitoring"
+        params = self._signed_query()
+        data = {
+            "action": action,
+            "deviceId": str(device_id),
+            "monitoringDeviceNumber": str(monitoring_device_number),
+            "resolutionLevel": resolution_level,
+        }
+        headers = self._headers()
+        async with asyncio.timeout(10.0):
+            async with session.post(url, params=params, json=data, headers=headers) as resp:
+                self._capture_cookies(resp)
+                resp_data = await resp.json()
+                payload = self._extract_payload(resp_data)
+                if isinstance(payload, dict):
+                    return payload.get("rtspUrl") or payload.get("url") or payload.get("streamUrl")
+                if isinstance(payload, str) and payload.startswith("rtsp://"):
+                    return payload
+                return None
+
     async def async_close(self) -> None:
         """Close client session if owned."""
         if self._own_session and self._session and not self._session.closed:
@@ -345,3 +391,4 @@ class AveCloudApi:
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.async_close()
+

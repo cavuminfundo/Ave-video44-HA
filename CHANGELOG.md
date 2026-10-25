@@ -16,6 +16,30 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.1.1 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Fixed RTSP Connection Refused on 2-Wire Cloud Indoor Monitors (`TS-SMART`)**:
+  - Resolved `Error opening stream (Connection refused, rtsp://127.0.0.1:554/live/sub)` on 2-wire bus outdoor doorstations when connected via cloud indoor monitors.
+  - In 2-wire installations, outdoor station cameras are physically powered down and inactive during idle states. `camera.py` now returns `None` from `get_rtsp_url()` and `stream_source()` when idle, preventing Home Assistant stream workers from repeatedly spamming connection attempts to inactive local endpoints.
+  - Dynamically enables `CameraEntityFeature.STREAM` only when an active RTSP/RTSPS stream URL is actually available.
+- **Added Cloud Video Monitoring Endpoints (`core/api.py`)**:
+  - Implemented `get_monitoring_list()` and `control_monitoring()` cloud REST API endpoints matching the AVE/GVS cloud protocol, allowing on-demand activation of video streams.
+- **Added Offline Device Registry Fallback in Coordinator (`coordinator.py`)**:
+  - Added graceful fallback handling in `DataUpdateCoordinator` so device entities remain properly initialized in the Home Assistant registry even if cloud authentication or devices are temporarily unreachable during initial startup.
+
+### 🇮🇹 Italiano
+
+- **Risolto Errore di Connessione RTSP Rifiutata sui Monitor Cloud a 2 Fili (`TS-SMART`)**:
+  - Risolto l'errore `Error opening stream (Connection refused, rtsp://127.0.0.1:554/live/sub)` che si verificava con posti esterni su bus 2 fili connessi tramite monitor interno cloud.
+  - Negli impianti a 2 fili le telecamere dei posti esterni sono fisicamente spente e disalimentate quando a riposo. L'entità `camera.py` restituisce ora `None` da `get_rtsp_url()` e `stream_source()` in stato di idle, impedendo ai worker di Home Assistant di effettuare tentativi continui di connessione su endpoint locali non raggiungibili.
+  - Abilitazione dinamica di `CameraEntityFeature.STREAM` solo ed esclusivamente quando è disponibile un URL di streaming RTSP/RTSPS attivo.
+- **Aggiunti Endpoint Cloud di Monitoraggio Video (`core/api.py`)**:
+  - Implementati gli endpoint REST cloud `get_monitoring_list()` e `control_monitoring()` conformi al protocollo AVE/GVS, consentendo l'attivazione video su richiesta dal cloud.
+- **Aggiunto Fallback Offline nel Registro Dispositivi del Coordinator (`coordinator.py`)**:
+  - Gestione resiliente dello stato offline nel `DataUpdateCoordinator`: le entità e i dispositivi rimangono registrati e coerenti nel registro di Home Assistant anche in caso di disconnessione temporanea o mancata risposta cloud durante l'avvio.
+
 ## v1.1.0 — 2026-10-25
 
 ### 🇬🇧 English

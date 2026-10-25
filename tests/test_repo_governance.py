@@ -92,11 +92,11 @@ def test_icons_json_and_translation_keys():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
 
-    assert manifest["version"] == "1.1.0"
-    assert pyproject["project"]["version"] == "1.1.0"
+    assert manifest["version"] == "1.1.1"
+    assert pyproject["project"]["version"] == "1.1.1"
     match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
     assert match is not None
-    assert match.group(1) == "1.1.0"
+    assert match.group(1) == "1.1.1"
 
 
 def test_card_editor_and_zero_yaml_support():
@@ -115,7 +115,7 @@ def test_card_editor_and_zero_yaml_support():
 def test_init_add_extra_js_url():
     init_py = (ROOT / "custom_components" / "ave_video44" / "__init__.py").read_text(encoding="utf-8")
     assert "add_extra_js_url" in init_py
-    assert "/ave_video44_frontend/ave-video44-card.js?v=1.1.0" in init_py
+    assert "/ave_video44_frontend/ave-video44-card.js?v=1.1.1" in init_py
 
 
 

@@ -232,7 +232,7 @@ def _ensure_ha_stubs():
         def options(self):
             return self._attr_options
 
-    class CameraEntityFeature:
+    class CameraEntityFeature(int):
         STREAM = 1
 
     class Camera(Entity):

@@ -57,7 +57,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
     try:
         from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, "/ave_video44_frontend/ave-video44-card.js?v=1.1.0")
+        add_extra_js_url(hass, "/ave_video44_frontend/ave-video44-card.js?v=1.1.1")
     except Exception as err:
         _LOGGER.debug("Could not call add_extra_js_url: %s", err)
 
