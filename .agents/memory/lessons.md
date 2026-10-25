@@ -193,12 +193,11 @@
   3. Automatically terminate orphaned sessions after 20 seconds of consumer read inactivity.
 - Frontend AbortController: When navigating away from or backgrounding the card in the Android Companion App, all in-flight HTTP requests must be aborted via `AbortController` and disconnected gracefully in `visibilitychange` / `disconnectedCallback` to prevent Lovelace "Configuration error" warnings upon app resume.
 
+---
 
+## 2026-10-25 — v1.2.8 Lovelace Card Single Hangup & Clean Video Stream (19. Unobstructed Video Feed & Action Disambiguation)
 
-
-
-
-
-
-
-
+### 19. Unobstructed Video Feed & Action Disambiguation in Monitoring Mode
+- **Action Duplication**: In outdoor station monitoring mode (`this._callState === 'monitoring'`), the Lovelace card previously showed two red 'Chiudi' buttons simultaneously: the primary in `#inCallControls` and the dynamic toggle on `#btnCallIntercom`. Hiding `#btnHangup` specifically during monitoring leaves a single, clear close button at the bottom without sacrificing dedicated Answer/Reject and Terminate controls in call states.
+- **Unobstructed Video Feed**: Overlays like `#callerBanner` covering the camera stream degrade video clarity on mobile devices. Card state announcements belong in the card header's `#statusBadge`, leaving the camera stream 100% clean and unobstructed.
+- **Safe DOM Purging**: When removing obsolete UI overlay elements, completely purge their lookups (`getElementById('callerBanner')`, `callerNameText`) and all associated `.classList` calls across all state transitions to prevent `TypeError: Cannot read properties of null` during lifecycle resets.
