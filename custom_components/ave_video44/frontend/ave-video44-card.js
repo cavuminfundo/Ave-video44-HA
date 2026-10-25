@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.1.2";
+const CARD_VERSION = "1.2.0";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -33,7 +33,8 @@ class AveVideo44Card extends HTMLElement {
       lock_driveway: "",
       call_state_sensor: "",
       doorbell_binary_sensor: "",
-      intercom_select: ""
+      intercom_select: "",
+      wake_camera_button: ""
     };
     if (hass && hass.states) {
       const keys = Object.keys(hass.states);
@@ -51,6 +52,8 @@ class AveVideo44Card extends HTMLElement {
           stub.doorbell_binary_sensor = k;
         } else if (!stub.intercom_select && k.indexOf("select.") === 0 && (k.indexOf("interfono") !== -1 || k.indexOf("intercom") !== -1)) {
           stub.intercom_select = k;
+        } else if (!stub.wake_camera_button && k.indexOf("button.") === 0 && (k.indexOf("attiva_telecamera") !== -1 || k.indexOf("wake_camera") !== -1)) {
+          stub.wake_camera_button = k;
         }
       }
     }
@@ -129,6 +132,16 @@ class AveVideo44Card extends HTMLElement {
         }
       }
     }
+
+    if (!this._config.wake_camera_button) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf("button.") === 0 && (k.indexOf("attiva_telecamera") !== -1 || k.indexOf("wake_camera") !== -1)) {
+          this._config.wake_camera_button = k;
+          break;
+        }
+      }
+    }
   }
 
   connectedCallback() {
@@ -171,7 +184,11 @@ class AveVideo44Card extends HTMLElement {
       if (this._callState !== "talking") {
         this._setCallState("talking");
       }
-    } else if (this._callState !== "idle" && (callSensorState === "idle" || (!callSensorState && doorbellState === "off"))) {
+    } else if (callSensorState === "monitoring") {
+      if (this._callState !== "monitoring") {
+        this._setCallState("monitoring");
+      }
+    } else if (this._callState !== "idle" && (callSensorState === "idle" || (!callSensorState && doorbellState === "off" && this._callState !== "monitoring"))) {
       if (this._inCall) {
         this._cleanupCall();
       }
@@ -198,7 +215,7 @@ class AveVideo44Card extends HTMLElement {
 
   _setCallState(newState) {
     this._callState = newState;
-    this._inCall = (newState === "ringing" || newState === "talking");
+    this._inCall = (newState === "ringing" || newState === "talking" || newState === "monitoring");
     this._updateView();
   }
 
@@ -220,10 +237,13 @@ class AveVideo44Card extends HTMLElement {
           box-sizing: border-box;
         }
 
-        .card-container {
+        ha-card, .card-container {
           background-color: var(--ave-bg-primary);
           color: var(--ave-text-primary);
-          border-radius: 12px;
+          max-width: 780px;
+          width: 100%;
+          margin: 0 auto;
+          border-radius: 28px;
           overflow: hidden;
           border: 1px solid var(--ave-bg-surface);
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
@@ -234,19 +254,32 @@ class AveVideo44Card extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 14px 16px;
+          padding: 14px 18px;
           background-color: var(--ave-bg-surface);
           border-bottom: 1px solid #3f3f46;
+          border-top-left-radius: 28px;
+          border-top-right-radius: 28px;
         }
 
         .card-title-group {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 12px;
+        }
+
+        .header-icon-bubble {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 38px;
+          height: 38px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.08);
+          color: var(--ave-text-primary);
         }
 
         .card-title {
-          font-size: 1rem;
+          font-size: 1.05rem;
           font-weight: 600;
           margin: 0;
           color: var(--ave-text-primary);
@@ -254,9 +287,9 @@ class AveVideo44Card extends HTMLElement {
 
         .status-badge {
           font-size: 0.75rem;
-          font-weight: 500;
-          padding: 3px 8px;
-          border-radius: 9999px;
+          font-weight: 600;
+          padding: 4px 12px;
+          border-radius: 999px;
           background: #3f3f46;
           color: var(--ave-text-primary);
         }
@@ -271,6 +304,11 @@ class AveVideo44Card extends HTMLElement {
           color: #ffffff;
         }
 
+        .status-badge.monitoring {
+          background-color: var(--ave-accent-blue);
+          color: #ffffff;
+        }
+
         .status-badge.error {
           background-color: var(--ave-accent-hangup);
           color: #ffffff;
@@ -278,9 +316,11 @@ class AveVideo44Card extends HTMLElement {
 
         .video-container {
           position: relative;
-          width: 100%;
+          width: calc(100% - 24px);
+          margin: 12px auto 0 auto;
           aspect-ratio: 16 / 9;
           background-color: #09090b;
+          border-radius: 22px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -327,27 +367,48 @@ class AveVideo44Card extends HTMLElement {
 
         .button-group {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-          gap: 8px;
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+
+        @media (min-width: 560px) {
+          .button-group {
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+          }
         }
 
         button {
           display: inline-flex;
           align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 10px 14px;
+          justify-content: flex-start;
+          gap: 10px;
+          padding: 6px 16px 6px 6px;
           font-size: 0.875rem;
-          font-weight: 500;
-          border-radius: 6px;
+          font-weight: 600;
+          border-radius: 999px;
           border: 1px solid transparent;
           cursor: pointer;
-          transition: background-color 0.15s ease, border-color 0.15s ease;
+          transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
           outline: none;
+        }
+
+        button:active {
+          transform: scale(0.98);
         }
 
         button:focus-visible {
           box-shadow: 0 0 0 3px var(--ave-focus-ring);
+        }
+
+        .btn-icon-bubble {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.12);
+          flex-shrink: 0;
         }
 
         .btn-surface {
@@ -396,8 +457,8 @@ class AveVideo44Card extends HTMLElement {
 
         select {
           flex: 1;
-          padding: 9px 12px;
-          border-radius: 6px;
+          padding: 10px 14px;
+          border-radius: 999px;
           background-color: var(--ave-bg-surface);
           color: var(--ave-text-primary);
           border: 1px solid #3f3f46;
@@ -431,7 +492,7 @@ class AveVideo44Card extends HTMLElement {
       <div class="card-container" id="mainContainer" role="region" aria-label="Videocitofono AVE">
         <header class="card-header">
           <div class="card-title-group">
-            <ha-icon icon="mdi:doorbell-video"></ha-icon>
+            <span class="header-icon-bubble"><ha-icon icon="mdi:doorbell-video"></ha-icon></span>
             <h2 class="card-title" id="cardTitle"></h2>
           </div>
           <span class="status-badge" id="statusBadge" role="status"></span>
@@ -457,30 +518,34 @@ class AveVideo44Card extends HTMLElement {
         <div class="controls-panel">
           <div id="inCallControls" class="button-group hidden">
             <button id="btnAnswer" class="btn-answer" aria-label="Rispondi alla chiamata">
-              <ha-icon icon="mdi:phone"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:phone"></ha-icon></span>
               <span>Rispondi</span>
             </button>
             <button id="btnHangup" class="btn-hangup" aria-label="Chiudi o rifiuta la chiamata">
-              <ha-icon icon="mdi:phone-hangup"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:phone-hangup"></ha-icon></span>
               <span>Rifiuta</span>
             </button>
             <button id="btnMute" class="btn-surface" aria-label="Attiva o disattiva microfono">
-              <ha-icon id="muteIcon" icon="mdi:microphone"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon id="muteIcon" icon="mdi:microphone"></ha-icon></span>
               <span id="muteLabel">Muto</span>
             </button>
             <button id="btnUnlockInCall" class="btn-surface" aria-label="Apri cancelletto pedonale">
-              <ha-icon icon="mdi:door-open"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:door-open"></ha-icon></span>
               <span>Apri Porta</span>
             </button>
           </div>
 
           <div id="idleControls" class="button-group">
+            <button id="btnMonitor" class="btn-surface" aria-label="Attiva telecamera esterna">
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:cctv"></ha-icon></span>
+              <span>Attiva Video</span>
+            </button>
             <button id="btnUnlockPedestrian" class="btn-surface" aria-label="Apri cancelletto pedonale">
-              <ha-icon icon="mdi:door"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:door"></ha-icon></span>
               <span>Apri Cancelletto</span>
             </button>
             <button id="btnUnlockDriveway" class="btn-surface" aria-label="Apri cancello carraio">
-              <ha-icon icon="mdi:gate"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:gate"></ha-icon></span>
               <span>Apri Cancello</span>
             </button>
           </div>
@@ -489,7 +554,7 @@ class AveVideo44Card extends HTMLElement {
             <label for="intercomSelect" class="sr-only" style="display:none">Rubrica Interni</label>
             <select id="intercomSelect" aria-label="Seleziona interno per chiamata"></select>
             <button id="btnCallIntercom" class="btn-blue" aria-label="Avvia chiamata all'interno selezionato">
-              <ha-icon icon="mdi:phone-outgoing"></ha-icon>
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:phone-outgoing"></ha-icon></span>
               <span>Chiama</span>
             </button>
           </div>
@@ -507,6 +572,15 @@ class AveVideo44Card extends HTMLElement {
     shadow.getElementById("btnHangup").addEventListener("click", () => this._hangup());
     shadow.getElementById("btnMute").addEventListener("click", () => this._toggleMute());
     shadow.getElementById("btnUnlockInCall").addEventListener("click", () => this._unlock("1"));
+    const btnMonitor = shadow.getElementById("btnMonitor");
+    if (btnMonitor) {
+      btnMonitor.addEventListener("click", () => this._monitor());
+    }
+    const placeholder = shadow.getElementById("videoPlaceholder");
+    if (placeholder) {
+      placeholder.style.cursor = "pointer";
+      placeholder.addEventListener("click", () => this._monitor());
+    }
     shadow.getElementById("btnUnlockPedestrian").addEventListener("click", () => this._unlock("1"));
     shadow.getElementById("btnUnlockDriveway").addEventListener("click", () => this._unlock("2"));
     shadow.getElementById("btnCallIntercom").addEventListener("click", () => this._callIntercom());
@@ -518,7 +592,8 @@ class AveVideo44Card extends HTMLElement {
 
     const titleEl = shadow.getElementById("cardTitle");
     if (titleEl) {
-      titleEl.textContent = this._config.title || "AVE Video V44";
+      const title = (this._config && this._config.title) ? String(this._config.title) : "AVE Video V44";
+      titleEl.textContent = title;
     }
 
     const badgeEl = shadow.getElementById("statusBadge");
@@ -528,6 +603,8 @@ class AveVideo44Card extends HTMLElement {
         badgeEl.textContent = "Chiamata in arrivo";
       } else if (this._callState === "talking") {
         badgeEl.textContent = "In conversazione";
+      } else if (this._callState === "monitoring") {
+        badgeEl.textContent = "Monitoraggio attivo";
       } else if (this._callState === "error") {
         badgeEl.textContent = "Errore linea";
       } else if (this._callState === "loading") {
@@ -560,7 +637,11 @@ class AveVideo44Card extends HTMLElement {
 
     const callerNameEl = shadow.getElementById("callerNameText");
     if (callerNameEl) {
-      callerNameEl.textContent = `Chiamante: ${this._config.device_id || "Posto Esterno"}`;
+      if (this._callState === "monitoring") {
+        callerNameEl.textContent = "Monitoraggio Posto Esterno";
+      } else {
+        callerNameEl.textContent = "Chiamante: " + ((this._config && this._config.device_id) ? this._config.device_id : "Posto Esterno");
+      }
     }
   }
 
@@ -582,18 +663,47 @@ class AveVideo44Card extends HTMLElement {
     const cameraEntity = this._config.entity || this._config.camera_entity;
     if (cameraEntity && this._hass && this._hass.states[cameraEntity]) {
       const token = this._hass.states[cameraEntity].attributes ? this._hass.states[cameraEntity].attributes.access_token : "";
-      const streamUrl = token
+      let streamUrl = token
         ? `/api/camera_proxy_stream/${cameraEntity}?token=${token}`
         : `/api/camera_proxy/${cameraEntity}`;
 
+      if (this._inCall || this._callState === "monitoring") {
+        streamUrl = streamUrl + `&t=${Date.now()}`;
+      }
+
       if (cameraStreamImg) {
+        if (!this._streamImgBound) {
+          this._streamImgBound = true;
+          this._imgRetryCount = 0;
+          cameraStreamImg.onerror = () => {
+            if (this._inCall && this._imgRetryCount < 5) {
+              this._imgRetryCount++;
+              if (this._imgRetryTimer) {
+                clearTimeout(this._imgRetryTimer);
+              }
+              this._imgRetryTimer = setTimeout(() => {
+                if (this._inCall && cameraStreamImg) {
+                  const base = cameraStreamImg.src.split("&t=")[0];
+                  cameraStreamImg.src = `${base}&t=${Date.now()}`;
+                }
+              }, 2200);
+            }
+          };
+          cameraStreamImg.onload = () => {
+            this._imgRetryCount = 0;
+          };
+        }
         if (cameraStreamImg.src !== streamUrl) {
           cameraStreamImg.src = streamUrl;
         }
         cameraStreamImg.classList.remove("hidden");
       }
       if (liveVideo) {
-        liveVideo.classList.remove("hidden");
+        if (!liveVideo.srcObject && !liveVideo.getAttribute("src")) {
+          liveVideo.classList.add("hidden");
+        } else {
+          liveVideo.classList.remove("hidden");
+        }
       }
       if (videoPlaceholder) {
         videoPlaceholder.classList.add("hidden");
@@ -611,6 +721,21 @@ class AveVideo44Card extends HTMLElement {
       inCallControls.classList.remove("hidden");
       idleControls.classList.add("hidden");
       callerBanner.classList.remove("hidden");
+      const btnAnswer = shadow.getElementById("btnAnswer");
+      if (btnAnswer) {
+        if (this._callState === "monitoring") {
+          btnAnswer.classList.add("hidden");
+        } else {
+          btnAnswer.classList.remove("hidden");
+        }
+      }
+      const btnHangup = shadow.getElementById("btnHangup");
+      if (btnHangup) {
+        const span = btnHangup.querySelector("span");
+        if (span) {
+          span.textContent = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
+        }
+      }
       if (placeholderText) {
         placeholderText.textContent = "Streaming audio/video in corso";
       }
@@ -624,6 +749,29 @@ class AveVideo44Card extends HTMLElement {
       if (placeholderText) {
         placeholderText.textContent = "Nessuna chiamata attiva";
       }
+    }
+  }
+
+  async _monitor() {
+    this._setCallState("monitoring");
+    try {
+      if (this._hass) {
+        if (this._config.wake_camera_button && this._hass.states && this._hass.states[this._config.wake_camera_button]) {
+          await this._hass.callService("button", "press", {
+            entity_id: this._config.wake_camera_button
+          });
+        } else {
+          await this._hass.connection.sendMessagePromise({
+            type: "ave_video44/call_control",
+            device_id: this._config.device_id || "",
+            action: "monitor"
+          });
+        }
+      }
+    } catch (err) {
+      const errMsg = (err && err.message) ? err.message : String(err);
+      this._showError(`Attivazione telecamera non riuscita: ${errMsg}`);
+      this._setCallState("idle");
     }
   }
 
@@ -853,6 +1001,11 @@ class AveVideo44Card extends HTMLElement {
   }
 
   _cleanupCall() {
+    if (this._imgRetryTimer) {
+      clearTimeout(this._imgRetryTimer);
+      this._imgRetryTimer = null;
+    }
+    this._imgRetryCount = 0;
     if (this._mediaStream) {
       this._mediaStream.getTracks().forEach((track) => track.stop());
       this._mediaStream = null;
@@ -959,31 +1112,35 @@ class AveVideo44CardEditor extends HTMLElement {
       <div class="card-config">
         <div class="config-row">
           <label for="cfgTitle">Titolo Card</label>
-          <input id="cfgTitle" type="text" placeholder="AVE Video V44" />
+          <input id="cfgTitle" data-field="title" type="text" placeholder="AVE Video V44" />
         </div>
         <div class="config-row">
           <label for="cfgEntity">Entità Telecamera</label>
-          <input id="cfgEntity" type="text" placeholder="camera.unita_interna_cloud_due_fili_ts_smart_telecamera" />
+          <input id="cfgEntity" data-field="entity" type="text" placeholder="camera.unita_interna_cloud_due_fili_ts_smart_telecamera" />
         </div>
         <div class="config-row">
           <label for="cfgPedestrian">Serratura Pedonale</label>
-          <input id="cfgPedestrian" type="text" placeholder="lock.unita_interna_cloud_due_fili_ts_smart_serratura_pedonale" />
+          <input id="cfgPedestrian" data-field="lock_pedestrian" type="text" placeholder="lock.unita_interna_cloud_due_fili_ts_smart_serratura_pedonale" />
         </div>
         <div class="config-row">
           <label for="cfgDriveway">Cancello Carraio</label>
-          <input id="cfgDriveway" type="text" placeholder="lock.unita_interna_cloud_due_fili_ts_smart_cancello_carraio" />
+          <input id="cfgDriveway" data-field="lock_driveway" type="text" placeholder="lock.unita_interna_cloud_due_fili_ts_smart_cancello_carraio" />
         </div>
         <div class="config-row">
           <label for="cfgCallSensor">Sensore Stato Chiamata</label>
-          <input id="cfgCallSensor" type="text" placeholder="sensor.unita_interna_cloud_due_fili_ts_smart_stato_chiamata" />
+          <input id="cfgCallSensor" data-field="call_state_sensor" type="text" placeholder="sensor.unita_interna_cloud_due_fili_ts_smart_stato_chiamata" />
         </div>
         <div class="config-row">
           <label for="cfgDoorbell">Sensore Chiamata in Arrivo</label>
-          <input id="cfgDoorbell" type="text" placeholder="binary_sensor.unita_interna_cloud_due_fili_ts_smart_chiamata_in_arrivo" />
+          <input id="cfgDoorbell" data-field="doorbell_binary_sensor" type="text" placeholder="binary_sensor.unita_interna_cloud_due_fili_ts_smart_chiamata_in_arrivo" />
         </div>
         <div class="config-row">
           <label for="cfgIntercomSelect">Selettore Rubrica Interni</label>
-          <input id="cfgIntercomSelect" type="text" placeholder="select.unita_interna_cloud_due_fili_ts_smart_destinazione_interfono" />
+          <input id="cfgIntercomSelect" data-field="intercom_select" type="text" placeholder="select.unita_interna_cloud_due_fili_ts_smart_destinazione_interfono" />
+        </div>
+        <div class="config-row">
+          <label for="cfgWakeBtn">Pulsante Attiva Telecamera</label>
+          <input id="cfgWakeBtn" data-field="wake_camera_button" type="text" placeholder="button.unita_interna_cloud_due_fili_ts_smart_attiva_telecamera" />
         </div>
       </div>
     `;
@@ -995,6 +1152,7 @@ class AveVideo44CardEditor extends HTMLElement {
     const callInput = shadow.getElementById("cfgCallSensor");
     const bellInput = shadow.getElementById("cfgDoorbell");
     const selectInput = shadow.getElementById("cfgIntercomSelect");
+    const wakeInput = shadow.getElementById("cfgWakeBtn");
 
     titleInput.addEventListener("change", () => this._handleInput("title", titleInput.value));
     entityInput.addEventListener("change", () => this._handleInput("entity", entityInput.value));
@@ -1003,6 +1161,7 @@ class AveVideo44CardEditor extends HTMLElement {
     callInput.addEventListener("change", () => this._handleInput("call_state_sensor", callInput.value));
     bellInput.addEventListener("change", () => this._handleInput("doorbell_binary_sensor", bellInput.value));
     selectInput.addEventListener("change", () => this._handleInput("intercom_select", selectInput.value));
+    wakeInput.addEventListener("change", () => this._handleInput("wake_camera_button", wakeInput.value));
   }
 
   _updateValues() {
@@ -1016,14 +1175,16 @@ class AveVideo44CardEditor extends HTMLElement {
     const callInput = shadow.getElementById("cfgCallSensor");
     const bellInput = shadow.getElementById("cfgDoorbell");
     const selectInput = shadow.getElementById("cfgIntercomSelect");
+    const wakeInput = shadow.getElementById("cfgWakeBtn");
 
-    if (titleInput) titleInput.value = this._config.title || "";
+    if (titleInput) titleInput.value = (this._config && this._config.title) ? String(this._config.title) : "";
     if (entityInput) entityInput.value = this._config.entity || this._config.camera_entity || "";
     if (pedInput) pedInput.value = this._config.lock_pedestrian || "";
     if (driveInput) driveInput.value = this._config.lock_driveway || "";
     if (callInput) callInput.value = this._config.call_state_sensor || "";
     if (bellInput) bellInput.value = this._config.doorbell_binary_sensor || "";
     if (selectInput) selectInput.value = this._config.intercom_select || "";
+    if (wakeInput) wakeInput.value = this._config.wake_camera_button || "";
   }
 
   _handleInput(key, value) {

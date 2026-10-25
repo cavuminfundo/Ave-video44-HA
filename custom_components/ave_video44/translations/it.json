@@ -49,7 +49,8 @@
           "action": "Azione",
           "intercom_book": "Rubrica Interni (formato: codice=Nome, ...)",
           "unlock_pulse_duration": "Durata impulso apertura (secondi)",
-          "preferred_video_stream": "Flusso video preferito"
+          "preferred_video_stream": "Flusso video preferito",
+          "enable_sidebar_panel": "Mostra plancia 'Videocitofono' nella barra laterale"
         }
       },
       "add_intercom": {
@@ -67,12 +68,17 @@
           "remove_code": "Interno da Rimuovere"
         }
       },
+      "auto_discover": {
+        "title": "Scopri Automaticamente Interni",
+        "description": "Scansione e aggiunta automatica degli interni e posti esterni rilevati sul bus e su cloud."
+      },
       "settings": {
         "title": "Impostazioni Generali",
         "description": "Configura la durata dell'impulso di apertura e la qualità streaming video.",
         "data": {
           "unlock_pulse_duration": "Durata impulso apertura (secondi)",
-          "preferred_video_stream": "Flusso video preferito"
+          "preferred_video_stream": "Flusso video preferito",
+          "enable_sidebar_panel": "Mostra plancia 'Videocitofono' nella barra laterale"
         }
       }
     }
@@ -87,20 +93,23 @@
       }
     },
     "button": {
+      "answer": {
+        "name": "Rispondi"
+      },
+      "call": {
+        "name": "Chiama Interfono"
+      },
+      "hangup": {
+        "name": "Riaggancia"
+      },
       "unlock_1": {
         "name": "Apriporta Pedonale"
       },
       "unlock_2": {
         "name": "Apriporta Carraio"
       },
-      "call": {
-        "name": "Chiama Interfono"
-      },
-      "answer": {
-        "name": "Rispondi"
-      },
-      "hangup": {
-        "name": "Riaggancia"
+      "wake_camera": {
+        "name": "Attiva Telecamera"
       }
     },
     "binary_sensor": {

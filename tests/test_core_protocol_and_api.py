@@ -300,3 +300,28 @@ async def test_coordinator_auto_heal_and_device_normalization():
     assert dev["firmwareVersion"] == "2.0"
     assert dev["online"] is True
     assert hass.config_entries.async_update_entry.called
+
+
+@pytest.mark.asyncio
+async def test_control_monitoring_returns_numeric_call_id():
+    """Verify control_monitoring returns numeric string call_id when result is str or int."""
+    session = MagicMock()
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.cookies = {}
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=None)
+    session.post = MagicMock(return_value=mock_resp)
+
+    api = AveCloudApi(session=session, token="tok", session_id="sess")
+
+    # Numeric string in result
+    mock_resp.json = AsyncMock(return_value={"code": 0, "result": "833971686813601792"})
+    call_id_str = await api.control_monitoring(device_id="677771932745207808", monitoring_device_number="1", action=1)
+    assert call_id_str == "833971686813601792"
+
+    # Int in result
+    mock_resp.json = AsyncMock(return_value={"code": 0, "result": 833971686813601792})
+    call_id_int = await api.control_monitoring(device_id="677771932745207808", monitoring_device_number="1", action=1)
+    assert call_id_int == "833971686813601792"
+

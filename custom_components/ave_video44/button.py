@@ -31,6 +31,7 @@ async def async_setup_entry(
                 AveVideo44CallButton(coordinator, dev_id, name="Chiama Interfono"),
                 AveVideo44AnswerButton(coordinator, dev_id, name="Rispondi"),
                 AveVideo44HangupButton(coordinator, dev_id, name="Riaggancia"),
+                AveVideo44WakeCameraButton(coordinator, dev_id, name="Attiva Telecamera"),
             ])
 
     async_add_entities(entities)
@@ -122,3 +123,25 @@ class AveVideo44HangupButton(AveVideo44BaseEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Hang up call."""
         await self.coordinator.async_hangup_call(self.device_id)
+
+
+class AveVideo44WakeCameraButton(AveVideo44BaseEntity, ButtonEntity):
+    """Button to wake outdoor camera / start live monitoring."""
+
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        coordinator: AveVideo44Coordinator,
+        device_id: int | str,
+        name: str = "Attiva Telecamera",
+    ) -> None:
+        super().__init__(coordinator, device_id, unique_key="btn_wake_camera")
+        self._attr_name = name
+        self._attr_translation_key = "wake_camera"
+        self._attr_icon = "mdi:cctv"
+
+    async def async_press(self) -> None:
+        """Wake camera / start monitoring."""
+        await self.coordinator.async_wake_camera(self.device_id)
+

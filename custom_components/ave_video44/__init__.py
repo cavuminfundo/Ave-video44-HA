@@ -13,7 +13,11 @@ try:
 except ImportError:
     StaticPathConfig = None
 
-from .const import DOMAIN
+from .const import (
+    CONF_ENABLE_SIDEBAR_PANEL,
+    DEFAULT_ENABLE_SIDEBAR_PANEL,
+    DOMAIN,
+)
 from .coordinator import AveVideo44Coordinator
 from .websocket_api import async_register_websocket_commands
 
@@ -32,8 +36,9 @@ PLATFORMS: list[Platform] = [
 ]
 
 
-_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.1.2"
+_CARD_URL = "/ave_video44_card/ave-video44-card.js"
+_LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
+_CARD_VERSION = "1.2.0"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -43,11 +48,11 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_frontend/ave-video44-card.js?v=1.1.2"
+    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.2.0"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
 
-    # 1) Register static path
+    # 1) Register static paths (both new and legacy for full cache bypass and backward compatibility)
     if hasattr(hass, "http") and hasattr(hass.http, "async_register_static_paths") and StaticPathConfig:
         try:
             await hass.http.async_register_static_paths([
@@ -55,16 +60,21 @@ async def _async_register_card(hass: HomeAssistant) -> None:
                     path=str(card_path),
                     url_path=_CARD_URL,
                     cache_headers=False,
-                )
+                ),
+                StaticPathConfig(
+                    path=str(card_path),
+                    url_path=_LEGACY_CARD_URL,
+                    cache_headers=False,
+                ),
             ])
-            _LOGGER.debug("Registered static path for %s", _CARD_URL)
+            _LOGGER.debug("Registered static paths for %s and %s", _CARD_URL, _LEGACY_CARD_URL)
         except Exception as err:
             _LOGGER.debug("Could not register static path: %s", err)
 
     # 2) Call add_extra_js_url
     try:
         from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, "/ave_video44_frontend/ave-video44-card.js?v=1.1.2")
+        add_extra_js_url(hass, "/ave_video44_card/ave-video44-card.js?v=1.2.0")
     except Exception as err:
         _LOGGER.debug("Could not call add_extra_js_url: %s", err)
 
@@ -79,6 +89,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
                 existing = [
                     item for item in resources.async_items()
                     if str(item.get("url", "")).startswith(_CARD_URL)
+                    or str(item.get("url", "")).startswith(_LEGACY_CARD_URL)
                 ]
                 if not existing and hasattr(resources, "async_create_item"):
                     await resources.async_create_item({"res_type": "module", "url": resource_url})
@@ -153,12 +164,81 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await _async_disable_duplicate_unlock_buttons(hass, entry)
 
+    await _async_sync_sidebar_dashboard(hass, entry)
+
     _async_register_services(hass)
 
     if hasattr(entry, "add_update_listener") and hasattr(entry, "async_on_unload"):
         entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
+
+
+async def _async_sync_sidebar_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Sync native Lovelace storage dashboard panel and sidebar visibility."""
+    try:
+        enable_sidebar = entry.options.get(
+            CONF_ENABLE_SIDEBAR_PANEL,
+            entry.data.get(CONF_ENABLE_SIDEBAR_PANEL, DEFAULT_ENABLE_SIDEBAR_PANEL),
+        )
+
+        if not enable_sidebar:
+            try:
+                from homeassistant.components import frontend
+                if hasattr(frontend, "async_remove_panel"):
+                    frontend.async_remove_panel(hass, "ave-video44", warn_if_unknown=False)
+            except Exception as fe_err:
+                _LOGGER.debug("Could not remove frontend panel: %s", fe_err)
+
+        config_dir = (
+            Path(hass.config.config_dir)
+            if hasattr(hass, "config") and hasattr(hass.config, "config_dir")
+            else Path("/config")
+        )
+        storage_dir = config_dir / ".storage"
+        if not storage_dir.exists():
+            return
+
+        dashboards_file = storage_dir / "lovelace_dashboards"
+        if dashboards_file.exists():
+            try:
+                import json
+                dash_content = json.loads(dashboards_file.read_text(encoding="utf-8"))
+                items = dash_content.get("data", {}).get("items", [])
+                updated = False
+                for item in items:
+                    if item.get("id") == "ave_video44" or item.get("url_path") == "ave-video44":
+                        item["show_in_sidebar"] = bool(enable_sidebar)
+                        item["mode"] = "storage"
+                        updated = True
+                        break
+                if not updated and enable_sidebar:
+                    items.append({
+                        "id": "ave_video44",
+                        "show_in_sidebar": True,
+                        "icon": "mdi:doorbell-video",
+                        "title": "Videocitofono",
+                        "require_admin": False,
+                        "mode": "storage",
+                        "url_path": "ave-video44",
+                    })
+                dashboards_file.write_text(json.dumps(dash_content, indent=2), encoding="utf-8")
+            except Exception as d_err:
+                _LOGGER.debug("Could not update lovelace_dashboards: %s", d_err)
+
+        ave_dash_file = storage_dir / "lovelace.ave_video44"
+        if ave_dash_file.exists():
+            try:
+                import json
+                ave_content = json.loads(ave_dash_file.read_text(encoding="utf-8"))
+                views = ave_content.get("data", {}).get("config", {}).get("views", [])
+                if views and isinstance(views[0], dict):
+                    views[0]["type"] = "panel"
+                    ave_dash_file.write_text(json.dumps(ave_content, indent=2), encoding="utf-8")
+            except Exception as a_err:
+                _LOGGER.debug("Could not update lovelace.ave_video44 view to panel: %s", a_err)
+    except Exception as err:
+        _LOGGER.debug("Could not sync sidebar dashboard: %s", err)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -182,6 +262,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry on options change."""
+    await _async_sync_sidebar_dashboard(hass, entry)
     coordinator: AveVideo44Coordinator = getattr(
         entry, "runtime_data", None
     ) or hass.data.get(DOMAIN, {}).get("entries", {}).get(entry.entry_id)

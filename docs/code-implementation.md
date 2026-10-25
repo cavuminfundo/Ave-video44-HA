@@ -243,29 +243,43 @@ In `AveVideo44Coordinator`, when initializing or updating state:
 
 ## 9. Frontend Lovelace Card Auto-Registration & Visual Editor Contract
 
-### 9.1 Zero-YAML Resource Registration (`add_extra_js_url`)
+### 9.1 Zero-YAML Resource Registration & Cache-Bypass (`/ave_video44_card/`)
 The custom element card is automatically registered during integration setup without requiring manual dashboard resource entry:
 
 ```python
 async def async_register_card(hass: HomeAssistant) -> None:
-    """Register custom Lovelace card via static path and add_extra_js_url."""
+    """Register custom Lovelace card via static path and Lovelace resources."""
     from homeassistant.components.frontend import add_extra_js_url
 
     card_path = Path(__file__).parent / "ave-video44-card.js"
-    url_path = f"/ave_video44_frontend/ave-video44-card.js?v={VERSION}"
+    url_path = f"/ave_video44_card/ave-video44-card.js?v={VERSION}"
+    
+    # Register static path with cache_headers=False to bypass immutable WebView caching
+    hass.http.register_static_path(
+        "/ave_video44_card/ave-video44-card.js",
+        str(card_path),
+        cache_headers=False,
+    )
+    # Maintain legacy alias for backward compatibility
     hass.http.register_static_path(
         "/ave_video44_frontend/ave-video44-card.js",
         str(card_path),
         cache_headers=False,
     )
     add_extra_js_url(hass, url_path)
+
+    # Programmatic registration in Lovelace Storage Resources
+    resources = getattr(hass.data.get("lovelace"), "resources", None)
+    if resources and hasattr(resources, "async_create_item"):
+        # Ensures card is declared as res_type: "module" in .storage/lovelace_resources
+        ...
 ```
 
-- **Cache-Busting**: The URL parameter `?v={VERSION}` invalidates browser-cached scripts immediately upon upgrading the integration, preventing stale JavaScript evaluation.
+- **Cache-Busting & Path Switch**: Serving the card on `/ave_video44_card/ave-video44-card.js?v={VERSION}` with `cache_headers=False` bypasses immutable 31-day Service Worker and mobile Companion App WebView caches.
 - **Fail-Safe Loading**: The loader handles headless and unit test environments gracefully where `hass.http` or `frontend` may not be initialized.
 
-### 9.2 Custom Card Visual Editor (`ave-video44-card-editor`)
-To support Home Assistant's UI card picker and visual dashboard editing:
+### 9.2 Custom Card Visual Editor (`ave-video44-card-editor`) & Bubble Card Architecture
+To support Home Assistant's UI card picker, modern dashboard visual standards, and panel responsiveness:
 - **Card Registration**:
   ```javascript
   window.customCards = window.customCards || [];
@@ -276,6 +290,12 @@ To support Home Assistant's UI card picker and visual dashboard editing:
     preview: true,
   });
   ```
+- **Bubble Card Styling & DOM Layout**:
+  - Container: Pill container (`border-radius: 28px`) with subtle dark blur backdrop.
+  - Buttons: Full-pill action buttons (`.bubble-pill-btn`, `border-radius: 999px`) containing a circular icon bubble (`.bubble-icon`, `border-radius: 50%`) and text label.
+  - Viewport: Rounded 16:9 video frame (`border-radius: 22px`). Element `<video id="liveVideo">` remains hidden while empty, with automatic fallback and retry on `cameraStreamImg` during 2-wire wake-up transitions.
+  - Responsive Grid: `repeat(auto-fit, minmax(200px, 1fr))` on desktop, responsive adaptive layout on mobile, constrained to `max-width: 780px` in panel view.
+- **Customizable Title**: Card title is configurable via YAML (`title: ...`) or in the visual card editor (`Titolo Card`, defaulting to `"AVE Video V44"`).
 - **Editor Element Hook**: `AveVideo44Card.getConfigElement()` returns a newly instantiated `document.createElement("ave-video44-card-editor")`.
 - **Dynamic Entity Auto-Discovery (`getStubConfig`)**:
   ```javascript
@@ -287,7 +307,7 @@ To support Home Assistant's UI card picker and visual dashboard editing:
     };
     return {
       type: "custom:ave-video44-card",
-      title: "Videocitofono",
+      title: "AVE Video V44",
       entity: findEntity("camera.", "camera.posto_esterno_ingresso"),
       intercom_select: findEntity("select.", "select.rubrica_interni"),
       call_state_sensor: findEntity("sensor.", "sensor.posto_esterno_stato_chiamata"),
@@ -316,5 +336,57 @@ The integration provides two mechanisms to operate doorstation relays:
 
 ### 10.2 Non-Destructive Registry Upgrades
 Setting `_attr_entity_registry_enabled_default = False` at the entity class level only affects newly created or discovered entities. Users who previously enabled or explicitly disabled button entities in their entity registry retain their customized visibility settings without breaking automations.
+
+---
+
+## 11. On-Demand Camera Wake & Monitoring Session Lifecycle
+
+### 11.1 2-Wire Doorstation Energy Optimization & Wake Endpoint
+In 2-wire installations (`TS-SMART` indoor monitor + 2-wire doorstation), the outdoor unit camera is physically powered down when idle to conserve energy and bus power. Attempting to connect to the idle RTSP stream yields `Connection refused`.
+
+To wake the outdoor station camera on demand, the integration calls `POST /smarthome/api/device-monitoring/monitoring`:
+```json
+{
+  "action": 1,
+  "deviceId": "<indoor_monitor_deviceId>",
+  "monitoringDeviceNumber": "1",
+  "resolutionLevel": 0
+}
+```
+- **Response**: Returns `statusCode: 200` and `result: "<callId>"` representing the active monitoring session transaction ID.
+- **RTSPS Stream Construction**: When the monitor activates, the coordinator builds the cloud RTSPS URL:
+  `rtsps://{user}:{pwd}@{domain}:8322/stream/1/{deviceId}/0/{targetNum}`
+  using `rtsp_cfg["auth"]["basic"]["username"]`, `rtsp_cfg["auth"]["basic"]["password"]`, and `ports.rtsps` (`8322`).
+- **Dynamic MQTT Synchronization**: On incoming MQTT event `"code": "monitoring"` with `value.result.serverUrl`, the coordinator dynamically refreshes `active_rtsp_url`.
+- **FFmpeg MJPEG Camera Proxy**: In `camera.py`, `async_camera_image` and `handle_async_mjpeg_stream` return `None` when idle (preventing FFmpeg connection loops when unpowered) and spawn FFmpeg with `-rtsp_transport tcp` when `active_rtsp_url` is active.
+
+### 11.2 Graceful Monitoring Session Teardown (`action: 3`)
+- When the user stops previewing or the call ends, the coordinator invokes `POST /smarthome/api/device-monitoring/monitoring` with `action: 3`.
+- **API Invariant**: The cloud API requires `action: 3` for session termination; sending `action: 0` is rejected with error `-1000000400`.
+- The coordinator clears `active_rtsp_url = None` and resets `call_state = "idle"`.
+
+---
+
+## 12. Intercom Auto-Discovery & Startup Seeding
+
+### 12.1 Auto-Discovery Engine (`async_discover_intercoms`)
+- Queries `GET /smarthome/api/quick-display-device/user-current-home` and `GET /smarthome/api/device-monitoring/monitoring-list`.
+- Extracts:
+  - Outdoor station relays from `extraConfig`: `{"deviceNumber": "1", "deviceName": "Citofono"}`.
+  - Indoor extensions from `deviceIntercomInfo`: `haZone`, `username`, room addresses.
+  - Discovered local endpoints via UDP 8300 `COM_PING_ASK` broadcast.
+
+### 12.2 Startup Seeding & Guided OptionsFlow
+- **Auto-Seeding**: During integration setup, if `intercom_book` is empty in options, the coordinator invokes `async_discover_intercoms()` and auto-populates the dictionary into `entry.options`.
+- **OptionsFlow Integration**: Exposes `auto_discover` as the top-level option in `AveVideo44OptionsFlow`. Clicking it triggers discovery and persists newly found contacts in a single step without manual text editing.
+
+---
+
+## 13. Sidebar Dashboard Panel Management (`enable_sidebar_panel`)
+
+The integration offers an optional dedicated sidebar panel dashboard (`Videocitofono`) served in full panel mode (`"type": "panel"`):
+- **Configuration Option**: Managed via `CONF_ENABLE_SIDEBAR_PANEL` (`enable_sidebar_panel`, default `True`) in OptionsFlow settings.
+- **Dynamic Synchronization**: Handled in `__init__.py` via `_async_sync_sidebar_panel(hass, entry)`, creating or updating the panel registration in `.storage/lovelace_dashboards` and matching `show_in_sidebar`.
+- **Zero-YAML Layout**: The generated sidebar dashboard embeds `custom:ave-video44-card` configured with auto-resolved entities and constrained responsive width.
 
 

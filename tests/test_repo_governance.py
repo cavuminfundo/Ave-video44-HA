@@ -93,11 +93,11 @@ def test_icons_json_and_translation_keys():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
 
-    assert manifest["version"] == "1.1.2"
-    assert pyproject["project"]["version"] == "1.1.2"
+    assert manifest["version"] == "1.2.0"
+    assert pyproject["project"]["version"] == "1.2.0"
     match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
     assert match is not None
-    assert match.group(1) == "1.1.2"
+    assert match.group(1) == "1.2.0"
 
 
 def test_card_editor_and_zero_yaml_support():
@@ -113,10 +113,26 @@ def test_card_editor_and_zero_yaml_support():
     assert "${this._config" not in editor_code, "Prevent DOM XSS: do not interpolate config values directly into innerHTML"
 
 
+def test_card_bubble_styling_retry_and_title():
+    """Verify Bubble Card pill styling, retry timer, hidden live video, and title support."""
+    card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
+    assert 'CARD_VERSION = "1.2.0"' in card_js or "CARD_VERSION = '1.2.0'" in card_js
+    assert "border-radius: 28px" in card_js
+    assert ".btn-icon-bubble" in card_js
+    assert "max-width: 780px" in card_js
+    assert 'liveVideo.classList.add("hidden")' in card_js
+    assert "cameraStreamImg" in card_js and "onerror" in card_js
+    assert 'data-field="title"' in card_js
+    assert "?." not in card_js, "Optional chaining ?. forbidden for WebView compatibility"
+    assert "??" not in card_js, "Nullish coalescing ?? forbidden for WebView compatibility"
+    assert "${this._config" not in card_js
+
+
+
 def test_init_add_extra_js_url():
     init_py = (ROOT / "custom_components" / "ave_video44" / "__init__.py").read_text(encoding="utf-8")
     assert "add_extra_js_url" in init_py
-    assert "/ave_video44_frontend/ave-video44-card.js?v=1.1.2" in init_py
+    assert "/ave_video44_card/ave-video44-card.js?v=1.2.0" in init_py
 
 
 
@@ -158,11 +174,12 @@ def test_diagnostics_redaction():
 
 
 def test_card_idempotent_guards():
-    """Verify customElements.define and customCards have idempotency guards."""
+    """Verify customElements.define and customCards have idempotency guards and monitor button."""
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
     assert 'customElements.get("ave-video44-card")' in card_js
     assert 'customElements.get("ave-video44-card-editor")' in card_js
     assert "window.customCards.some(" in card_js
+    assert "btnMonitor" in card_js or "_monitor" in card_js
 
 
 @pytest.mark.asyncio
@@ -203,7 +220,7 @@ async def test_async_register_card_registers_lovelace_resource():
 
     items = hass.data["lovelace"].resources.async_items()
     assert len(items) == 1
-    assert items[0]["url"] == "/ave_video44_frontend/ave-video44-card.js?v=1.1.2"
+    assert items[0]["url"] == "/ave_video44_card/ave-video44-card.js?v=1.2.0"
     assert items[0]["res_type"] == "module"
     assert hass.data[DOMAIN]["card_registered"] is True
 

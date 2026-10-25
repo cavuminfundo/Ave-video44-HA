@@ -41,6 +41,10 @@ def _ensure_ha_stubs():
     camera_mod = ModuleType("homeassistant.components.camera")
     websocket_api_mod = ModuleType("homeassistant.components.websocket_api")
     http_mod = ModuleType("homeassistant.components.http")
+    ffmpeg_mod = ModuleType("homeassistant.components.ffmpeg")
+    ffmpeg_mod.DATA_FFMPEG = "ffmpeg"
+    ffmpeg_mod.async_get_image = AsyncMock(return_value=b"test_image")
+    components_mod.ffmpeg = ffmpeg_mod
 
     class HomeAssistant:
         def __init__(self):
@@ -290,6 +294,7 @@ def _ensure_ha_stubs():
         "homeassistant.components.camera": camera_mod,
         "homeassistant.components.websocket_api": websocket_api_mod,
         "homeassistant.components.http": http_mod,
+        "homeassistant.components.ffmpeg": ffmpeg_mod,
     }
     for name, mod in stubs.items():
         sys.modules[name] = mod

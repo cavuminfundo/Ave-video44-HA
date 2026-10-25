@@ -15,9 +15,11 @@ from .const import (
     CONF_PASSWORD,
     CONF_PREFERRED_VIDEO_STREAM,
     CONF_UNLOCK_PULSE_DURATION,
+    CONF_ENABLE_SIDEBAR_PANEL,
     DEFAULT_INTERCOM_BOOK,
     DEFAULT_PREFERRED_VIDEO_STREAM,
     DEFAULT_UNLOCK_PULSE_DURATION,
+    DEFAULT_ENABLE_SIDEBAR_PANEL,
     DOMAIN,
 )
 from .core.api import AveCloudApi
@@ -102,6 +104,7 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_INTERCOM_BOOK: DEFAULT_INTERCOM_BOOK,
                             CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
                             CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
+                            CONF_ENABLE_SIDEBAR_PANEL: DEFAULT_ENABLE_SIDEBAR_PANEL,
                         },
                     )
             except Exception as err:
@@ -194,6 +197,7 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_INTERCOM_BOOK: DEFAULT_INTERCOM_BOOK,
                             CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
                             CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
+                            CONF_ENABLE_SIDEBAR_PANEL: DEFAULT_ENABLE_SIDEBAR_PANEL,
                         },
                     )
             except Exception as err:
@@ -241,8 +245,12 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
         """Manage user options or route to guided actions."""
         if user_input is not None:
             if "action" not in user_input:
-                return self.async_create_entry(title="", data=user_input)
+                options = dict(self.config_entry.options) if self.config_entry else {}
+                options.update(user_input)
+                return self.async_create_entry(title="", data=options)
             action = user_input["action"]
+            if action == "auto_discover":
+                return await self.async_step_auto_discover()
             if action == "add_intercom":
                 return await self.async_step_add_intercom()
             if action == "remove_intercom":
@@ -253,13 +261,48 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
-                vol.Required("action", default="settings"): vol.In({
+                vol.Required("action", default="auto_discover"): vol.In({
+                    "auto_discover": "Scopri automaticamente interni e posti esterni (Auto-Discovery)",
                     "add_intercom": "Aggiungi interno alla rubrica",
                     "remove_intercom": "Rimuovi interno dalla rubrica",
                     "settings": "Impostazioni generali",
                 }),
             }),
         )
+
+    async def async_step_auto_discover(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> config_entries.ConfigFlowResult:
+        """Auto-discover intercom and doorstation contacts from bus and cloud."""
+        options = dict(self.config_entry.options) if self.config_entry else {}
+        coordinator = None
+        if self.config_entry:
+            coordinator = getattr(self.config_entry, "runtime_data", None)
+            if not coordinator and hasattr(self, "hass") and self.hass:
+                coordinator = self.hass.data.get(DOMAIN, {}).get("entries", {}).get(self.config_entry.entry_id)
+
+        discovered = {}
+        if coordinator and hasattr(coordinator, "async_discover_intercoms"):
+            discovered = await coordinator.async_discover_intercoms()
+
+        # Parse existing contacts
+        current_raw = options.get(CONF_INTERCOM_BOOK, "") or ""
+        contacts_dict = {}
+        for item in current_raw.split(","):
+            item = item.strip()
+            if "=" in item:
+                c, n = item.split("=", 1)
+                contacts_dict[c.strip()] = n.strip()
+
+        # Merge discovered contacts
+        contacts_dict.update(discovered)
+
+        options[CONF_INTERCOM_BOOK] = ", ".join(f"{c}={n}" for c, n in sorted(contacts_dict.items()))
+        if coordinator:
+            coordinator.intercom_book = dict(contacts_dict)
+            coordinator.update_intercom_book()
+
+        return self.async_create_entry(title="", data=options)
 
     async def async_step_add_intercom(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -335,6 +378,10 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                 CONF_PREFERRED_VIDEO_STREAM,
                 options.get(CONF_PREFERRED_VIDEO_STREAM, DEFAULT_PREFERRED_VIDEO_STREAM),
             )
+            options[CONF_ENABLE_SIDEBAR_PANEL] = user_input.get(
+                CONF_ENABLE_SIDEBAR_PANEL,
+                options.get(CONF_ENABLE_SIDEBAR_PANEL, DEFAULT_ENABLE_SIDEBAR_PANEL),
+            )
             return self.async_create_entry(title="", data=options)
 
         current_pulse = options.get(
@@ -342,6 +389,9 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
         )
         current_stream = options.get(
             CONF_PREFERRED_VIDEO_STREAM, DEFAULT_PREFERRED_VIDEO_STREAM
+        )
+        current_sidebar = options.get(
+            CONF_ENABLE_SIDEBAR_PANEL, DEFAULT_ENABLE_SIDEBAR_PANEL
         )
 
         return self.async_show_form(
@@ -353,5 +403,8 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_PREFERRED_VIDEO_STREAM, default=current_stream
                 ): vol.In(["sub_stream", "main_stream"]),
+                vol.Optional(
+                    CONF_ENABLE_SIDEBAR_PANEL, default=current_sidebar
+                ): bool,
             }),
         )

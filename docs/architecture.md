@@ -138,9 +138,11 @@ custom_components/ave_video44/
 - Manages optimistic state transitions and dispatches event triggers for Home Assistant automations.
 
 ### 3.7 Entity Platforms
-- **`camera.py`**: Live RTSP stream (`rtsp://open-sips.gvs-icloud.com:554/...` or local LAN RTSP stream) with snapshot preview support.
+- **`camera.py`**: Live RTSP / TLS RTSPS cloud stream (`rtsps://{user}:{pwd}@{domain}:8322/stream/1/{deviceId}/0/{targetNum}`) and local LAN RTSP stream with FFmpeg MJPEG proxy support (`-rtsp_transport tcp`) for snapshots and live streams. On 2-wire bus installations, returns `None` and disables `CameraEntityFeature.STREAM` when idle, activating only when an active RTSP/RTSPS stream URL is provisioned during a call or monitoring session.
 - **`lock.py`**: Dual-lock control (`Lock 1` pedestrian, `Lock 2` driveway) with automated relock after `unlock_pulse_duration` (default: 2s).
-- **`button.py`**: Instant trigger buttons for pedestrian and driveway unlocking. Configured with `_attr_entity_registry_enabled_default = False` to prevent visual clutter in Home Assistant dashboards alongside primary `lock` entities, while remaining available in the Entity Registry for users requiring pulse shortcuts or automations.
+- **`button.py`**:
+  - `button.*_attiva_telecamera` (`AveVideo44WakeCameraButton`): Enabled by default. Wakes 2-wire outdoor stations on demand via `POST /smarthome/api/device-monitoring/monitoring` (`action=1`), dynamically provisioning the RTSP stream URL and transitioning state to `monitoring`.
+  - Instant trigger buttons for pedestrian and driveway unlocking: Configured with `_attr_entity_registry_enabled_default = False` to prevent visual clutter in Home Assistant dashboards alongside primary `lock` entities, while remaining available in the Entity Registry for users requiring pulse shortcuts or automations.
 - **`event.py`**: Doorbell call events (`doorbell_press`, `call_answered`, `call_missed`) using `EventDeviceClass.DOORBELL`.
 - **`binary_sensor.py`**: Active call state and network connectivity binary sensors.
 - **`sensor.py`**: Current call lifecycle state (`idle`, `ringing`, `talking`, `monitoring`) and call duration telemetry.
@@ -148,16 +150,21 @@ custom_components/ave_video44/
 - **`diagnostics.py`**: Anonymized diagnostics export with redaction of tokens, passwords, and sensitive keys.
 
 ### 3.8 Frontend Subsystem & Card Auto-Registration (`frontend/`)
-- **Zero-YAML Injection**: `card_loader.py` registers the static card asset via `add_extra_js_url(hass, f"/ave_video44_frontend/ave-video44-card.js?v={VERSION}")` upon integration setup. This eliminates manual addition to Lovelace resources and guarantees client cache-busting on version upgrades.
-- **Visual Card Editor (`ave-video44-card-editor`)**: The custom element registers `window.customCards` metadata and implements `getConfigElement()` returning an interactive form editor (`AveVideo44CardEditor`).
+- **Bubble Card Redesign**: Implements modern Bubble Card interface conventions (`border-radius: 28px` pill card container, `border-radius: 50%` circular icon bubbles inside full-pill action buttons, floating status badge, rounded 16:9 video frame).
+- **Customizable Title & Visual Editor**: Card title is fully customizable via `config.title` / `Titolo Card` in `AveVideo44CardEditor` (defaulting to `"AVE Video V44"`).
+- **Responsive Layout**: Desktop auto-fit grid and mobile view constrained to `max-width: 780px` in panel view.
+- **Zero-YAML Injection & Anti-Cache Endpoint**: `card_loader.py` serves the card at `/ave_video44_card/ave-video44-card.js?v={VERSION}` with `cache_headers=False` (with backwards-compatible alias at `/ave_video44_frontend/`) and programmatically inserts it as a JavaScript module into Home Assistant's Lovelace resource storage (`lovelace.resources`) and `add_extra_js_url`. This bypasses aggressive mobile WebView / Service Worker caching.
 - **Entity Auto-Discovery**: Implements `getStubConfig(hass, entities, [entity])` and `_autoResolveEntities` to automatically scan the Home Assistant entity registry for AVE cameras, locks, doorbell sensors, and address book selectors, populating card fields instantly when added via the visual card picker.
+- **On-Demand Camera Wake Control**: The Lovelace card includes an idle `"Attiva Video"` (`#btnMonitor`) button that wakes 2-wire cameras via WebSocket action `monitor`.
 
 ### 3.9 Guided Intercom Configuration Flow (`config_flow.py`)
 - **Guided OptionsFlow Wizard**: Multi-step interactive flow with dedicated sub-dialogs:
-  - `init`: Menu presenting options to Add or Edit Contact, Remove Contact, or General Settings.
+  - `init`: Menu presenting options for 1-click Auto-Discovery, Add or Edit Contact, Remove Contact, or General Settings.
+  - `auto_discover`: 1-click discovery scanning `user-current-home`, `monitoring-list`, and local UDP 8300 broadcasts to automatically detect and import room monitors, indoor extensions (`deviceIntercomInfo`), and doorstations (`extraConfig`).
   - `add_contact`: Structured form with inputs for Contact Name (Room/Label) and Intercom Extension Code / Address (e.g., `0102`, `1-1-102` or IP/SIP). Validates against duplicates and formats into canonical options storage.
   - `remove_contact`: Dropdown picker to select and delete an obsolete contact in a single click.
-  - `general_settings`: Configures relay pulse duration and preferred RTSP video stream profile.
+  - `general_settings`: Configures relay pulse duration, preferred RTSP video stream profile, and sidebar dashboard panel visibility (`enable_sidebar_panel`).
+- **Automatic Startup Seeding**: When the integration initializes with an empty `intercom_book`, the coordinator automatically seeds extension mappings from device metadata.
 
 ---
 

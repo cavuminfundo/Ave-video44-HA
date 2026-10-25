@@ -49,7 +49,8 @@
           "action": "Action",
           "intercom_book": "Intercom Directory (format: code=Name, ...)",
           "unlock_pulse_duration": "Unlock pulse duration (seconds)",
-          "preferred_video_stream": "Preferred video stream"
+          "preferred_video_stream": "Preferred video stream",
+          "enable_sidebar_panel": "Show 'Videocitofono' dashboard in sidebar"
         }
       },
       "add_intercom": {
@@ -67,12 +68,17 @@
           "remove_code": "Contact to Remove"
         }
       },
+      "auto_discover": {
+        "title": "Auto-Discover Intercom Contacts",
+        "description": "Automatically scan and register all indoor and outdoor intercom units found on bus and cloud."
+      },
       "settings": {
         "title": "General Settings",
         "description": "Configure door unlock pulse duration and preferred video stream quality.",
         "data": {
           "unlock_pulse_duration": "Unlock pulse duration (seconds)",
-          "preferred_video_stream": "Preferred video stream"
+          "preferred_video_stream": "Preferred video stream",
+          "enable_sidebar_panel": "Show 'Videocitofono' dashboard in sidebar"
         }
       }
     }
@@ -87,20 +93,23 @@
       }
     },
     "button": {
+      "answer": {
+        "name": "Answer"
+      },
+      "call": {
+        "name": "Call Intercom"
+      },
+      "hangup": {
+        "name": "Hangup"
+      },
       "unlock_1": {
         "name": "Pedestrian Unlock"
       },
       "unlock_2": {
         "name": "Gate Unlock"
       },
-      "call": {
-        "name": "Call Intercom"
-      },
-      "answer": {
-        "name": "Answer"
-      },
-      "hangup": {
-        "name": "Hangup"
+      "wake_camera": {
+        "name": "Wake Camera"
       }
     },
     "binary_sensor": {

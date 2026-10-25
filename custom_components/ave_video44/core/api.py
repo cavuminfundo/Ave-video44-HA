@@ -376,9 +376,17 @@ class AveCloudApi:
                 resp_data = await resp.json()
                 payload = self._extract_payload(resp_data)
                 if isinstance(payload, dict):
-                    return payload.get("rtspUrl") or payload.get("url") or payload.get("streamUrl")
-                if isinstance(payload, str) and payload.startswith("rtsp://"):
-                    return payload
+                    res = (
+                        payload.get("callId")
+                        or payload.get("call_id")
+                        or payload.get("rtspUrl")
+                        or payload.get("url")
+                        or payload.get("streamUrl")
+                        or payload.get("result")
+                    )
+                    return str(res).strip() if res is not None else None
+                if isinstance(payload, (str, int)) and str(payload).strip():
+                    return str(payload).strip()
                 return None
 
     async def async_close(self) -> None:

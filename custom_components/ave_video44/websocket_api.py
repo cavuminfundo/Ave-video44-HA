@@ -41,7 +41,7 @@ def _get_coordinator(
     vol.Required("type"): "ave_video44/call_control",
     vol.Optional("entry_id"): str,
     vol.Required("device_id"): vol.Any(int, str),
-    vol.Required("action"): vol.In(["answer", "hangup", "call", "unlock"]),
+    vol.Required("action"): vol.In(["answer", "hangup", "call", "unlock", "monitor"]),
     vol.Optional("room_code"): str,
     vol.Optional("lock_id", default="1"): vol.Any(int, str),
 })
@@ -51,7 +51,7 @@ async def ws_call_control(
     connection: websocket_api.ActiveConnection,
     msg: Dict[str, Any],
 ) -> None:
-    """Handle call control actions: answer, hangup, call intercom, and unlock."""
+    """Handle call control actions: answer, hangup, call intercom, unlock, and monitor."""
     try:
         coordinator = _get_coordinator(hass, msg.get("entry_id"), msg.get("device_id"))
     except Exception as err:
@@ -69,6 +69,10 @@ async def ws_call_control(
         await coordinator.async_call_intercom(device_id, room_code=msg.get("room_code"))
     elif action == "unlock":
         await coordinator.async_unlock(device_id, lock_id=str(msg.get("lock_id", "1")))
+    elif action == "monitor":
+        rtsp_url = await coordinator.async_wake_camera(device_id)
+        connection.send_result(msg["id"], {"success": True, "rtsp_url": rtsp_url})
+        return
 
     connection.send_result(msg["id"], {"success": True})
 

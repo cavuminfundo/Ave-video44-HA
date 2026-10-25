@@ -227,6 +227,13 @@ def _ensure_ha_stubs():
     device_registry_mod = ModuleType("homeassistant.helpers.device_registry")
     device_registry_mod.DeviceInfo = DeviceInfo
 
+    config_validation_mod = ModuleType("homeassistant.helpers.config_validation")
+    config_validation_mod.empty_config_schema = lambda domain: lambda x: x
+    config_validation_mod.config_entry_only_config_schema = lambda domain: lambda x: x
+    config_validation_mod.boolean = bool
+    config_validation_mod.string = str
+    config_validation_mod.positive_int = int
+
     # Register into sys.modules
     stubs = {
         "homeassistant": ha_mod,
@@ -235,6 +242,7 @@ def _ensure_ha_stubs():
         "homeassistant.const": const_mod,
         "homeassistant.exceptions": exceptions_mod,
         "homeassistant.helpers": helpers_mod,
+        "homeassistant.helpers.config_validation": config_validation_mod,
         "homeassistant.helpers.entity": entity_mod,
         "homeassistant.helpers.device_registry": device_registry_mod,
         "homeassistant.helpers.entity_platform": entity_platform_mod,
@@ -274,6 +282,7 @@ except ImportError:
     import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 
 from custom_components.ave_video44.const import (
     CONF_ACCOUNT,
@@ -283,6 +292,7 @@ from custom_components.ave_video44.const import (
     CONF_PASSWORD,
     CONF_PREFERRED_VIDEO_STREAM,
     CONF_UNLOCK_PULSE_DURATION,
+    CONF_ENABLE_SIDEBAR_PANEL,
     DOMAIN,
 )
 from custom_components.ave_video44.config_flow import (
@@ -427,10 +437,12 @@ async def test_options_flow_update():
         CONF_INTERCOM_BOOK: "1-1-101=Piano Terra, 1-1-102=Primo Piano, 1-1-103=Cugino",
         CONF_UNLOCK_PULSE_DURATION: 3,
         CONF_PREFERRED_VIDEO_STREAM: "main_stream",
+        CONF_ENABLE_SIDEBAR_PANEL: False,
     })
     assert res_save["type"] == "create_entry"
     assert "1-1-103=Cugino" in res_save["data"][CONF_INTERCOM_BOOK]
     assert res_save["data"][CONF_UNLOCK_PULSE_DURATION] == 3
+    assert res_save["data"][CONF_ENABLE_SIDEBAR_PANEL] is False
 
 
 def test_options_flow_read_only_base_property():
@@ -527,9 +539,45 @@ async def test_options_flow_guided_settings():
     res_save = await flow.async_step_settings({
         CONF_UNLOCK_PULSE_DURATION: 4,
         CONF_PREFERRED_VIDEO_STREAM: "main_stream",
+        CONF_ENABLE_SIDEBAR_PANEL: True,
     })
     assert res_save["type"] == "create_entry"
     assert res_save["data"][CONF_UNLOCK_PULSE_DURATION] == 4
     assert res_save["data"][CONF_PREFERRED_VIDEO_STREAM] == "main_stream"
     assert res_save["data"][CONF_INTERCOM_BOOK] == "0101=Piano Terra"
+    assert res_save["data"][CONF_ENABLE_SIDEBAR_PANEL] is True
+
+
+@pytest.mark.asyncio
+async def test_options_flow_auto_discover(monkeypatch=None):
+    """Test options flow 1-click auto-discovery step."""
+    entry = ConfigEntry(
+        entry_id="test_opt_entry",
+        data={CONF_ACCOUNT: "test@example.com"},
+        options={
+            CONF_INTERCOM_BOOK: "0101=Piano Terra",
+            CONF_UNLOCK_PULSE_DURATION: 2,
+        },
+    )
+    flow = AveVideo44OptionsFlow(entry)
+    hass = HomeAssistant()
+    mock_coord = MagicMock()
+    mock_coord.async_discover_intercoms = AsyncMock(return_value={"1": "Citofono", "0102": "Taverna"})
+    entry.runtime_data = mock_coord
+    hass.data[DOMAIN] = {"entries": {entry.entry_id: mock_coord}}
+    flow.hass = hass
+
+    # Step init action picker includes auto_discover
+    res_menu = await flow.async_step_init(None)
+    assert res_menu["type"] == "form"
+    assert "auto_discover" in res_menu["step_id"] or res_menu["step_id"] == "init"
+
+    # Selecting auto_discover
+    res_action = await flow.async_step_init({"action": "auto_discover"})
+    assert res_action["type"] == "create_entry"
+    book = res_action["data"][CONF_INTERCOM_BOOK]
+    assert "1=Citofono" in book
+    assert "0102=Taverna" in book
+    assert "0101=Piano Terra" in book
+
 

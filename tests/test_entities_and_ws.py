@@ -38,6 +38,10 @@ def _ensure_ha_stubs():
     camera_mod = ModuleType("homeassistant.components.camera")
     websocket_api_mod = ModuleType("homeassistant.components.websocket_api")
     http_mod = ModuleType("homeassistant.components.http")
+    ffmpeg_mod = ModuleType("homeassistant.components.ffmpeg")
+    ffmpeg_mod.DATA_FFMPEG = "ffmpeg"
+    ffmpeg_mod.async_get_image = AsyncMock(return_value=b"test_image")
+    components_mod.ffmpeg = ffmpeg_mod
 
     class HomeAssistant:
         def __init__(self):
@@ -61,7 +65,28 @@ def _ensure_ha_stubs():
         def __init_subclass__(cls, domain=None, **kwargs):
             cls.domain = domain
             super().__init_subclass__()
-    class OptionsFlow: pass
+        def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
+            return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {}, "description_placeholders": description_placeholders}
+        def async_create_entry(self, *, title, data, options=None):
+            return {"type": "create_entry", "title": title, "data": data, "options": options or {}}
+        def async_abort(self, *, reason):
+            return {"type": "abort", "reason": reason}
+        async def async_set_unique_id(self, unique_id):
+            self.unique_id = unique_id
+        def _abort_if_unique_id_configured(self):
+            pass
+
+    class OptionsFlow:
+        def __init__(self, config_entry=None):
+            self._config_entry = config_entry
+        @property
+        def config_entry(self):
+            return getattr(self, "_config_entry", None)
+        def async_show_form(self, *, step_id, data_schema=None, errors=None):
+            return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {}}
+        def async_create_entry(self, *, title, data):
+            return {"type": "create_entry", "title": title, "data": data}
+
     class ConfigEntry:
         def __init__(self, entry_id="test_entry", data=None, options=None, unique_id=None):
             self.entry_id = entry_id
@@ -108,6 +133,17 @@ def _ensure_ha_stubs():
             self.entity_id = None
             self._attr_name = None
             self._attr_unique_id = None
+            self._attr_translation_key = None
+            self._attr_icon = None
+        @property
+        def unique_id(self) -> str | None:
+            return getattr(self, "_attr_unique_id", None)
+        @property
+        def translation_key(self) -> str | None:
+            return getattr(self, "_attr_translation_key", None)
+        @property
+        def icon(self) -> str | None:
+            return getattr(self, "_attr_icon", None)
         @property
         def entity_registry_enabled_default(self) -> bool:
             return getattr(self, "_attr_entity_registry_enabled_default", True)
@@ -273,6 +309,13 @@ def _ensure_ha_stubs():
             self.cache_headers = cache_headers
     http_mod.StaticPathConfig = StaticPathConfig
 
+    config_validation_mod = ModuleType("homeassistant.helpers.config_validation")
+    config_validation_mod.empty_config_schema = lambda domain: lambda x: x
+    config_validation_mod.config_entry_only_config_schema = lambda domain: lambda x: x
+    config_validation_mod.boolean = bool
+    config_validation_mod.string = str
+    config_validation_mod.positive_int = int
+
     stubs = {
         "homeassistant": ha_mod,
         "homeassistant.core": core_mod,
@@ -280,6 +323,7 @@ def _ensure_ha_stubs():
         "homeassistant.const": const_mod,
         "homeassistant.exceptions": exceptions_mod,
         "homeassistant.helpers": helpers_mod,
+        "homeassistant.helpers.config_validation": config_validation_mod,
         "homeassistant.helpers.entity": entity_mod,
         "homeassistant.helpers.device_registry": device_registry_mod,
         "homeassistant.helpers.entity_registry": entity_registry_mod,
@@ -297,6 +341,7 @@ def _ensure_ha_stubs():
         "homeassistant.components.camera": camera_mod,
         "homeassistant.components.websocket_api": websocket_api_mod,
         "homeassistant.components.http": http_mod,
+        "homeassistant.components.ffmpeg": ffmpeg_mod,
     }
     for name, mod in stubs.items():
         sys.modules[name] = mod
@@ -353,6 +398,7 @@ from custom_components.ave_video44.button import (
     AveVideo44CallButton,
     AveVideo44HangupButton,
     AveVideo44UnlockButton,
+    AveVideo44WakeCameraButton,
 )
 from custom_components.ave_video44.binary_sensor import (
     AveVideo44IncomingCallBinarySensor,
@@ -595,12 +641,13 @@ async def test_camera_entity(mock_coordinator):
     url = await cam.stream_source()
     assert url == "rtsp://192.168.1.50:554/live/sub"
     assert cam.supported_features == CameraEntityFeature.STREAM
-    assert await cam.async_camera_image() is None
+    assert await cam.async_camera_image() == b"test_image"
 
     # When device has no IP (idle 2-wire camera)
     mock_coordinator.devices = [{"deviceId": 9991}]
     assert await cam.stream_source() is None
     assert cam.supported_features == CameraEntityFeature(0)
+    assert await cam.async_camera_image() is None
 
     # When get_rtsp_url is explicitly mocked
     mock_coordinator.get_rtsp_url = MagicMock(return_value="rtsp://192.168.1.100:554/live/sub")
@@ -823,4 +870,155 @@ def test_intercom_target_select_options_and_selection(mock_coordinator):
     assert select.options == ["0101 (Interno 1)", "0102 (Taverna)"]
     assert select.current_option == "0101 (Interno 1)"
     assert select.selected_room_code == "0101"
+
+
+# --- v1.2.0 Camera Wake & Auto-Discovery Tests ---
+
+@pytest.mark.asyncio
+async def test_wake_camera_button(mock_coordinator):
+    """Test AveVideo44WakeCameraButton entity properties and press action."""
+    mock_coordinator.async_wake_camera = AsyncMock(return_value="rtsps://test.url")
+    btn = AveVideo44WakeCameraButton(mock_coordinator, 9991)
+
+    assert btn._attr_entity_registry_enabled_default is True
+    assert "btn_wake_camera" in btn._attr_unique_id
+    assert btn._attr_translation_key == "wake_camera"
+    assert btn._attr_icon == "mdi:cctv"
+
+    await btn.async_press()
+    mock_coordinator.async_wake_camera.assert_called_once_with("9991")
+
+
+@pytest.mark.asyncio
+async def test_coordinator_async_wake_camera_and_hangup(mock_coordinator):
+    """Test coordinator.async_wake_camera parses nested auth basic and ports, and hangup clears it."""
+    mock_coordinator.api.control_monitoring = AsyncMock(return_value="833971686813601792")
+    mock_coordinator.api.get_rtsp_config = AsyncMock(return_value={
+        "auth": {
+            "basic": {
+                "username": "user!123",
+                "password": "pwd@456",
+            }
+        },
+        "serverEndpoints": [
+            {
+                "domain": "eu-video.gvs-icloud.com",
+                "ports": "{\"rtsps\": 8322}",
+            }
+        ],
+    })
+    mock_coordinator.devices = [
+        {"deviceId": "677771932745207808", "extraConfig": {"deviceNumber": "1", "deviceName": "Citofono"}}
+    ]
+
+    # 1. Wake camera
+    url = await mock_coordinator.async_wake_camera("677771932745207808")
+    assert mock_coordinator.api.control_monitoring.called
+    assert mock_coordinator.call_state == "monitoring"
+    assert mock_coordinator.active_device_id == "677771932745207808"
+    assert url == "rtsps://user%21123:pwd%40456@eu-video.gvs-icloud.com:8322/stream/1/677771932745207808/0/1"
+    assert mock_coordinator.active_rtsp_url == url
+    assert mock_coordinator.get_rtsp_url("677771932745207808") == url
+
+    # 2. Hangup stops monitoring with action=3 and clears state
+    await mock_coordinator.async_hangup_call("677771932745207808")
+    assert mock_coordinator.api.control_monitoring.call_args[1]["action"] == 3
+    assert mock_coordinator.active_rtsp_url is None
+    assert mock_coordinator.call_state == "idle"
+    assert mock_coordinator.get_rtsp_url("677771932745207808") is None
+
+
+@pytest.mark.asyncio
+async def test_coordinator_on_mqtt_event_monitoring(mock_coordinator):
+    """Test coordinator._on_mqtt_event handles monitoring push notification and updates active_rtsp_url."""
+    mock_coordinator._last_rtsp_auth = ("rtsps", "user%21123", "pwd%40456", "eu-video.gvs-icloud.com", 8322)
+    mock_coordinator.active_rtsp_url = None
+    mock_coordinator.call_state = "idle"
+
+    event_payload = {
+        "code": "monitoring",
+        "action": 1,
+        "value": {
+            "result": {
+                "serverUrl": "/stream/1/677771932745207808/0/1"
+            }
+        }
+    }
+    mock_coordinator._on_mqtt_event(event_payload)
+
+    assert mock_coordinator.call_state == "monitoring"
+    assert mock_coordinator.active_rtsp_url == "rtsps://user%21123:pwd%40456@eu-video.gvs-icloud.com:8322/stream/1/677771932745207808/0/1"
+
+
+@pytest.mark.asyncio
+async def test_camera_async_camera_image_ffmpeg(mock_coordinator):
+    """Test AveVideo44Camera.async_camera_image returns None when idle and delegates to ffmpeg when active."""
+    cam = AveVideo44Camera(mock_coordinator, device_id="677771932745207808")
+
+    # Idle
+    mock_coordinator.active_rtsp_url = None
+    mock_coordinator.get_rtsp_url = MagicMock(return_value=None)
+    assert await cam.async_camera_image() is None
+
+    # Active stream source
+    mock_coordinator.get_rtsp_url = MagicMock(return_value="rtsps://user:pwd@domain:8322/stream/1/677771932745207808/0/1")
+    with patch("homeassistant.components.ffmpeg.async_get_image", AsyncMock(return_value=b"test_jpeg")) as mock_ffmpeg:
+        img = await cam.async_camera_image(width=640, height=360)
+        assert img == b"test_jpeg"
+        mock_ffmpeg.assert_called_once_with(
+            cam.hass,
+            "rtsps://user:pwd@domain:8322/stream/1/677771932745207808/0/1",
+            extra_cmd="-rtsp_transport tcp",
+            width=640,
+            height=360,
+        )
+
+
+
+@pytest.mark.asyncio
+async def test_ws_call_control_monitor(mock_hass, mock_coordinator):
+    """Test websocket ave_video44/call_control with action=monitor."""
+    mock_hass.data[DOMAIN] = {"entries": {mock_coordinator.entry_id: mock_coordinator}}
+    conn = MagicMock()
+    conn.send_result = MagicMock()
+
+    mock_coordinator.async_wake_camera = AsyncMock(return_value="rtsps://test_stream")
+
+    msg = {
+        "id": 88,
+        "type": "ave_video44/call_control",
+        "device_id": 9991,
+        "action": "monitor",
+    }
+    await ws_api.ws_call_control(mock_hass, conn, msg)
+    mock_coordinator.async_wake_camera.assert_called_once_with(9991)
+    conn.send_result.assert_called_once()
+    assert conn.send_result.call_args[0][0] == 88
+
+
+@pytest.mark.asyncio
+async def test_coordinator_intercom_auto_discovery(mock_coordinator):
+    """Test coordinator.async_discover_intercoms discovers devices from extraConfig, deviceIntercomInfo and monitoring-list."""
+    mock_coordinator.devices = [
+        {
+            "deviceId": "9991",
+            "deviceName": "Posto Interno",
+            "extraConfig": {"deviceNumber": "1", "deviceName": "Citofono"},
+            "deviceIntercomInfo": [
+                {"haZone": "1", "username": "0101", "deviceName": "Unità interna cloud due fili (TS-SMART)"}
+            ],
+        }
+    ]
+    mock_coordinator.api.get_monitoring_list = AsyncMock(return_value=[
+        {"deviceNumber": "2", "name": "Posto Esterno 2"}
+    ])
+
+    discovered = await mock_coordinator.async_discover_intercoms()
+    assert "1" in discovered
+    assert discovered["1"] == "Citofono"
+    assert "0101" in discovered
+    assert "Zona 1" in discovered["0101"] or "TS-SMART" in discovered["0101"]
+    assert "2" in discovered
+    assert discovered["2"] == "Posto Esterno 2"
+
 

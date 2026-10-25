@@ -1,8 +1,10 @@
 """DataUpdateCoordinator for AVE Video V44 integration."""
 
 from datetime import datetime, timezone
+import json
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+import urllib.parse
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -62,6 +64,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.selected_intercom_targets: Dict[str, str] = {}
         self._ring_callbacks: List[Callable[[str, Dict[str, Any]], None]] = []
         self.active_rtsp_url: Optional[str] = None
+        self._last_rtsp_auth: Optional[Tuple[str, str, str, str, int]] = None
 
         self.intercom_book: Dict[str, str] = self._parse_intercom_book()
 
@@ -154,14 +157,156 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.active_device_id = str(device_id)
         self.async_update_listeners()
 
+    async def async_wake_camera(
+        self, device_id: int | str, monitoring_device_number: Optional[str] = None
+    ) -> Optional[str]:
+        """Wake outdoor camera / start live monitoring session."""
+        _LOGGER.debug("Waking camera for device %s", device_id)
+        mon_num = monitoring_device_number
+        if not mon_num:
+            dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
+            if dev and isinstance(dev.get("extraConfig"), dict):
+                mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
+            else:
+                mon_num = "1"
+
+        call_id = None
+        if self.api:
+            try:
+                call_id = await self.api.control_monitoring(
+                    device_id,
+                    monitoring_device_number=mon_num,
+                    action=1,
+                    resolution_level=0,
+                )
+            except Exception as err:
+                _LOGGER.error("Failed to start camera monitoring on API: %s", err)
+
+        scheme = "rtsps"
+        domain = "eu-video.gvs-icloud.com"
+        port = 8322
+        user = ""
+        pwd = ""
+
+        if self.api:
+            try:
+                rtsp_cfg = await self.api.get_rtsp_config()
+                if isinstance(rtsp_cfg, dict):
+                    auth = rtsp_cfg.get("auth")
+                    if isinstance(auth, dict):
+                        basic = auth.get("basic")
+                        if isinstance(basic, dict):
+                            user = basic.get("username") or ""
+                            pwd = basic.get("password") or ""
+                    if not user:
+                        user = rtsp_cfg.get("account") or rtsp_cfg.get("username") or ""
+                    if not pwd:
+                        pwd = rtsp_cfg.get("password") or ""
+
+                    endpoints = rtsp_cfg.get("serverEndpoints")
+                    if isinstance(endpoints, list) and endpoints:
+                        ep0 = endpoints[0]
+                        if isinstance(ep0, dict):
+                            domain = ep0.get("domain") or domain
+                            ports_val = ep0.get("ports")
+                            if isinstance(ports_val, str):
+                                try:
+                                    ports_val = json.loads(ports_val)
+                                except Exception:
+                                    pass
+                            if isinstance(ports_val, dict):
+                                port = ports_val.get("rtsps") or ports_val.get("rtsp") or port
+                    else:
+                        domain = rtsp_cfg.get("domain") or domain
+                        port = rtsp_cfg.get("port") or port
+            except Exception as err:
+                _LOGGER.debug("Error fetching rtsp config: %s", err)
+
+        user_enc = urllib.parse.quote(str(user), safe="") if user else ""
+        pwd_enc = urllib.parse.quote(str(pwd), safe="") if pwd else ""
+        target_num = mon_num or "1"
+        target_enc = urllib.parse.quote(str(target_num), safe="")
+
+        self._last_rtsp_auth = (scheme, user_enc, pwd_enc, domain, port)
+
+        auth_part = f"{user_enc}:{pwd_enc}@" if user_enc and pwd_enc else ""
+        self.active_rtsp_url = f"{scheme}://{auth_part}{domain}:{port}/stream/1/{device_id}/0/{target_enc}"
+        _LOGGER.debug("Active RTSP URL constructed for device %s (credentials redacted)", device_id)
+
+        self.active_device_id = str(device_id)
+        self.call_state = "monitoring"
+        self.async_update_listeners()
+        return self.active_rtsp_url
+
     async def async_hangup_call(self, device_id: int | str) -> None:
-        """Terminate active call."""
-        _LOGGER.debug("Hanging up call on device %s", device_id)
+        """Terminate active call or monitoring session."""
+        _LOGGER.debug("Hanging up call/monitoring on device %s", device_id)
+        if self.api and (self.call_state == "monitoring" or self.active_rtsp_url):
+            dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
+            mon_num = "1"
+            if dev and isinstance(dev.get("extraConfig"), dict):
+                mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
+            try:
+                await self.api.control_monitoring(
+                    device_id,
+                    monitoring_device_number=mon_num,
+                    action=3,
+                )
+            except Exception as err:
+                _LOGGER.debug("Error stopping camera monitoring: %s", err)
+
+        self.active_rtsp_url = None
         self.call_state = "idle"
         self.active_caller_id = ""
         self.active_caller_name = ""
         self.active_device_id = None
         self.async_update_listeners()
+
+    def _extract_discovered_intercoms_from_devices(
+        self, devices: List[Dict[str, Any]]
+    ) -> Dict[str, str]:
+        """Extract discovered intercom contacts from devices extraConfig and deviceIntercomInfo."""
+        discovered: Dict[str, str] = {}
+        for dev in devices:
+            extra = dev.get("extraConfig")
+            if isinstance(extra, dict):
+                dev_num = extra.get("deviceNumber")
+                if dev_num is not None:
+                    name = extra.get("deviceName") or dev.get("deviceName") or "Citofono"
+                    discovered[str(dev_num)] = str(name)
+
+            intercom_info = dev.get("deviceIntercomInfo")
+            if isinstance(intercom_info, list):
+                for item in intercom_info:
+                    if isinstance(item, dict):
+                        ha_zone = str(item.get("haZone") or "")
+                        username = str(item.get("username") or "")
+                        dev_name = item.get("deviceName") or "Unità interna"
+                        code = username or (f"010{ha_zone}" if ha_zone else "")
+                        if code:
+                            label = f"Zona {ha_zone} - {dev_name}" if ha_zone else str(dev_name)
+                            discovered[code] = label
+        return discovered
+
+    async def async_discover_intercoms(self) -> Dict[str, str]:
+        """Discover intercom and doorstation contacts from cloud and local devices."""
+        discovered = self._extract_discovered_intercoms_from_devices(self.devices)
+        if self.api:
+            for dev in self.devices:
+                dev_id = dev.get("deviceId")
+                if dev_id:
+                    try:
+                        mon_list = await self.api.get_monitoring_list(str(dev_id))
+                        if isinstance(mon_list, list):
+                            for item in mon_list:
+                                if isinstance(item, dict):
+                                    num = item.get("deviceNumber")
+                                    name = item.get("name") or item.get("deviceName")
+                                    if num is not None and name:
+                                        discovered[str(num)] = str(name)
+                    except Exception as err:
+                        _LOGGER.debug("Error querying monitoring list for %s: %s", dev_id, err)
+        return discovered
 
     async def async_unlock(self, device_id: int | str, lock_id: int | str = "1") -> None:
         """Unlock specified lock on device."""
@@ -240,8 +385,17 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     dev["firmwareVersion"] = dev.get("firmwareVersion") or dev.get("version") or "1.0"
                     dev["online"] = dev.get("online", True)
                     dev["isOnline"] = 1 if dev.get("online", True) else 0
+                    if "extraConfig" in d and "extraConfig" not in dev:
+                        dev["extraConfig"] = d["extraConfig"]
+                    if "deviceIntercomInfo" in d and "deviceIntercomInfo" not in dev:
+                        dev["deviceIntercomInfo"] = d["deviceIntercomInfo"]
                     normalized_devices.append(dev)
                 self.devices = normalized_devices
+
+                if not self.intercom_book:
+                    auto_discovered = self._extract_discovered_intercoms_from_devices(self.devices)
+                    if auto_discovered:
+                        self.intercom_book = auto_discovered
 
             if not self.devices:
                 try:
@@ -281,8 +435,17 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             )
             await self.mqtt_listener.async_start()
 
-    def _on_mqtt_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+    def _on_mqtt_event(
+        self, event_type_or_payload: Any, payload: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Dispatch push notifications from cloud MQTT thread-safely."""
+        if payload is None and isinstance(event_type_or_payload, dict):
+            payload = event_type_or_payload
+            event_type = str(payload.get("code") or "unknown")
+        else:
+            event_type = str(event_type_or_payload)
+            payload = payload or {}
+
         if hasattr(self.hass, "loop") and self.hass.loop:
             self.hass.loop.call_soon_threadsafe(
                 self._handle_mqtt_event_on_loop, event_type, payload
@@ -292,13 +455,50 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     def _handle_mqtt_event_on_loop(self, event_type: str, payload: Dict[str, Any]) -> None:
         """Handle MQTT event on event loop."""
+        code = payload.get("code") or event_type
+        action = payload.get("action")
         dev_id = payload.get("deviceId") or self.active_device_id
+
+        if code == "monitoring" and action == 1:
+            value = payload.get("value")
+            server_url = None
+            if isinstance(value, dict):
+                res = value.get("result")
+                if isinstance(res, dict):
+                    server_url = res.get("serverUrl") or res.get("server_url")
+                elif isinstance(res, str):
+                    server_url = res
+            if not server_url:
+                server_url = payload.get("serverUrl")
+
+            if server_url and "/stream" in server_url:
+                stream_path = server_url[server_url.index("/stream"):]
+                if self._last_rtsp_auth:
+                    scheme, user_enc, pwd_enc, domain, port = self._last_rtsp_auth
+                    auth_part = f"{user_enc}:{pwd_enc}@" if user_enc and pwd_enc else ""
+                    self.active_rtsp_url = f"{scheme}://{auth_part}{domain}:{port}{stream_path}"
+                else:
+                    self.active_rtsp_url = f"rtsps://eu-video.gvs-icloud.com:8322{stream_path}"
+
+            self.call_state = "monitoring"
+            if dev_id:
+                self.active_device_id = str(dev_id)
+            self.async_update_listeners()
+            return
+
+        if code == "monitoring" and action in (0, 3):
+            self.active_rtsp_url = None
+            self.call_state = "idle"
+            self.async_update_listeners()
+            return
+
         if event_type == "call_incoming":
             caller_id = payload.get("callerId") or payload.get("from", "intercom")
             call_type = payload.get("callType", "DEV_DOORSTATION")
             self.handle_incoming_call(caller_id, str(call_type), dev_id or "default")
             self.handle_ring_event(dev_id or "default", "doorstation_ring", str(caller_id))
         elif event_type == "call_ended":
+            self.active_rtsp_url = None
             self.call_state = "idle"
             self.async_update_listeners()
 

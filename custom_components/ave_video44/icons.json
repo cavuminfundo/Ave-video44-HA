@@ -23,6 +23,9 @@
       },
       "unlock_2": {
         "default": "mdi:gate-open"
+      },
+      "wake_camera": {
+        "default": "mdi:cctv"
       }
     },
     "camera": {

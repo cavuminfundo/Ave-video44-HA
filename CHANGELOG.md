@@ -16,6 +16,62 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.0 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Live RTSPS Cloud Video Streaming & FFmpeg Camera Proxy**:
+  - Implemented secure TLS RTSPS live video streaming (`rtsps://{user}:{pwd}@{domain}:8322/stream/1/{deviceId}/0/{targetNum}`) using cloud basic credentials and dedicated port 8322.
+  - Dynamically updates active stream endpoints on MQTT `"code": "monitoring"` events (`value.result.serverUrl`).
+  - Added FFmpeg MJPEG proxy in `camera.py` (`-rtsp_transport tcp`) for snapshots and live streams, returning `None` when idle to prevent stream errors while 2-wire hardware is unpowered.
+  - Graceful monitoring session teardown: sends `action: 3` via `POST /smarthome/api/device-monitoring/monitoring` upon call hangup or monitoring preview closure.
+- **Bubble Card UI Redesign & Customizable Card Title (`ave-video44-card.js`)**:
+  - Complete card interface redesign inspired by modern **Bubble Card** principles: pill card container (`border-radius: 28px`), circular icon bubbles (`border-radius: 50%`) inside full-pill action buttons (`.bubble-pill-btn`, `border-radius: 999px`), floating status badges, and rounded 16:9 video frame (`border-radius: 22px`).
+  - Customizable title (`config.title` / `Titolo Card`), configurable both in YAML and via the visual card editor (`ave-video44-card-editor`, default `"AVE Video V44"`).
+  - Responsive multi-device layout: desktop grid (`repeat(auto-fit, minmax(200px, 1fr))`) and mobile-optimized layout constrained to `max-width: 780px` in panel view.
+  - Clean video loading states: keeps `<video id="liveVideo">` hidden while empty and automatically retries `cameraStreamImg` during 2-wire wake-up delays.
+- **Optional `Videocitofono` Sidebar Dashboard Toggle (`enable_sidebar_panel`)**:
+  - Added `enable_sidebar_panel` toggle (default `True`) in Integration Options (**Settings -> Devices & Services -> AVE Video V44 -> Configure -> General settings**).
+  - Allows users to show or hide the dedicated `Videocitofono` panel dashboard in the Home Assistant sidebar navigation.
+- **On-Demand Camera Wake Button (`button.*_attiva_telecamera` / `wake_camera`) & Lovelace Card Monitor Control**:
+  - Added an enabled-by-default Camera Wake button (`button.attiva_telecamera` / `button.posto_esterno_attiva_telecamera`) allowing users to power up and stream the 2-wire outdoor doorstation camera on demand.
+  - In 2-wire bus installations, outdoor doorstation cameras are powered down when idle to conserve energy. Waking the camera dispatches `POST /smarthome/api/device-monitoring/monitoring` with `action: 1` (`resolutionLevel: 0`, `monitoringDeviceNumber`), returning an active session `callId`, setting state to `monitoring`, and dynamically acquiring the live RTSP stream URL.
+  - The bundled Lovelace card includes an `"Attiva Video"` (`#btnMonitor`) idle control button, triggering on-demand live video with a single click.
+- **1-Click Intercom Auto-Discovery & Startup Seeding (`OptionsFlow` & Coordinator)**:
+  - Added 1-click **Intercom Auto-Discovery** (`Scopri automaticamente interni e posti esterni (Auto-Discovery)`) as the primary option in integration options (**Settings -> Devices & Services -> AVE Video V44 -> Configure**).
+  - Automatically queries `user-current-home`, `monitoring-list`, and local UDP 8300 broadcasts to extract and register room units, extensions (`deviceIntercomInfo`), and doorstation relays (`extraConfig`).
+  - Automatically seeds `intercom_book` on startup if empty, immediately providing functional extension listings in `select.rubrica_interni`.
+- **Immutable Cache-Bypass Card Static Path (`/ave_video44_card/ave-video44-card.js`)**:
+  - Switched the primary Lovelace card static path to `/ave_video44_card/ave-video44-card.js?v=1.2.0` with `cache_headers=False` (retaining backward-compatible alias at `/ave_video44_frontend/`).
+  - Eliminates persistent caching issues in mobile Companion App WebViews and Service Workers, ensuring instant delivery of card updates.
+
+### 🇮🇹 Italiano
+
+- **Streaming Cloud Live RTSPS e Proxy Telecamera FFmpeg**:
+  - Implementato lo streaming live sicuro TLS RTSPS (`rtsps://{user}:{pwd}@{domain}:8322/stream/1/{deviceId}/0/{targetNum}`) tramite credenziali cloud basic e porta dedicata 8322.
+  - Sincronizzazione dinamica dell'endpoint di streaming con gli eventi MQTT `"code": "monitoring"` (`value.result.serverUrl`).
+  - Aggiunto proxy FFmpeg MJPEG in `camera.py` (`-rtsp_transport tcp`) per snapshot e streaming live, con restituzione di `None` a riposo per azzerare gli errori di connessione quando il posto esterno a 2 fili è spento.
+  - Rilascio corretto della sessione di monitoraggio: invio di `action: 3` via `POST /smarthome/api/device-monitoring/monitoring` alla chiusura dell'anteprima o al termine della conversazione.
+- **Riprogettazione Grafica Bubble Card e Titolo Personalizzabile (`ave-video44-card.js`)**:
+  - Interfaccia della card completamente ridisegnata ispirata ai canoni estetici **Bubble Card**: contenitore a pillola (`border-radius: 28px`), icone circolari a bolla (`border-radius: 50%`) all'interno dei pulsanti d'azione a pillola (`.bubble-pill-btn`, `border-radius: 999px`), badge di stato fluttuante e viewport video 16:9 arrotondato (`border-radius: 22px`).
+  - Titolo della card personalizzabile (`config.title` / `Titolo Card`), modificabile sia da YAML che dall'editor visuale (`ave-video44-card-editor`, predefinito `"AVE Video V44"`).
+  - Layout responsive desktop/mobile: griglia desktop (`repeat(auto-fit, minmax(200px, 1fr))`) e ottimizzazione per schermi mobile con larghezza massima limitata a `780px` in visualizzazione pannello (`panel`).
+  - Gestione fluida degli stati di caricamento: elemento video nascosto se privo di sorgente e tentativi automatici di ricaricamento di `cameraStreamImg` durante il transitorio di accensione del posto esterno.
+- **Controllo Visibilita Dashboard Laterale `Videocitofono` (`enable_sidebar_panel`)**:
+  - Nuova opzione `enable_sidebar_panel` (abilitata per impostazione predefinita) in Opzioni Integrazione (**Impostazioni -> Dispositivi e Servizi -> AVE Video V44 -> Configura -> Impostazioni generali**).
+  - Consente di mostrare o nascondere la plancia `Videocitofono` nella barra laterale di navigazione di Home Assistant.
+- **Pulsante di Risveglio Telecamera On-Demand (`button.*_attiva_telecamera` / `wake_camera`) e Controllo Monitor su Card Lovelace**:
+  - Aggiunta un'entità pulsante abilitata per impostazione predefinita (`button.attiva_telecamera` / `button.posto_esterno_attiva_telecamera`) per accendere e visualizzare su richiesta la telecamera del posto esterno a 2 fili.
+  - Negli impianti bus a 2 fili le telecamere dei posti esterni sono spente a riposo per risparmio energetico. La pressione del pulsante invia la richiesta cloud `POST /smarthome/api/device-monitoring/monitoring` con `action: 1`, ottenendo l'ID sessione `callId`, portando lo stato su `monitoring` e abilitando dinamicamente il flusso RTSP live.
+  - La card Lovelace integrata include ora il pulsante di visualizzazione a riposo `"Attiva Video"` (`#btnMonitor`), avviando lo streaming istantaneamente con un clic.
+- **Auto-Discovery Interfoni a 1 Clic e Auto-Seeding all'Avvio (`OptionsFlow` e Coordinator)**:
+  - Aggiunta la procedura a 1 clic **Scopri automaticamente interni e posti esterni (Auto-Discovery)** come prima scelta nelle opzioni dell'integrazione (**Impostazioni -> Dispositivi e Servizi -> AVE Video V44 -> Configura**).
+  - Scansiona e rileva automaticamente gli interni, le estensioni (`deviceIntercomInfo`) e i posti esterni (`extraConfig`) tramite API cloud e broadcast UDP locali sulla porta 8300.
+  - Popolamento automatico (auto-seeding) della rubrica `intercom_book` all'avvio dell'integrazione se vuota, garantendo la disponibilità immediata dei contatti in `select.rubrica_interni`.
+- **Nuovo Percorso Risorsa Card Anti-Cache (`/ave_video44_card/ave-video44-card.js`)**:
+  - Modificato il percorso statico primario della card Lovelace in `/ave_video44_card/ave-video44-card.js?v=1.2.0` con `cache_headers=False` (mantenendo l'alias retrocompatibile su `/ave_video44_frontend/`).
+  - Risolve definitivamente i problemi di caching ostinato delle WebView mobile (Home Assistant Companion App) e dei Service Worker del browser.
+
 ## v1.1.2 — 2026-10-25
 
 ### 🇬🇧 English

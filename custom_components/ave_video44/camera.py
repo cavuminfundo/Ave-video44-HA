@@ -1,6 +1,7 @@
 """Camera platform for AVE Video V44 RTSP stream."""
 
 import logging
+from typing import Any
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -67,4 +68,53 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
-        return None
+        url = await self.stream_source()
+        if not url:
+            return None
+        try:
+            from homeassistant.components import ffmpeg
+            return await ffmpeg.async_get_image(
+                self.hass, url, extra_cmd="-rtsp_transport tcp", width=width, height=height
+            )
+        except Exception as err:
+            _LOGGER.debug("Error generating camera image via ffmpeg: %s", err)
+            return None
+
+    async def handle_async_mjpeg_stream(
+        self, request: Any
+    ) -> Any:
+        """Serve live MJPEG stream converted from RTSP via FFmpeg."""
+        url = await self.stream_source()
+        if not url:
+            return None
+        try:
+            from haffmpeg.camera import CameraMjpeg
+            from homeassistant.components.ffmpeg import DATA_FFMPEG
+            from aiohttp import web
+
+            ffmpeg_manager = self.hass.data.get(DATA_FFMPEG)
+            if not ffmpeg_manager:
+                return None
+
+            stream = CameraMjpeg(ffmpeg_manager.binary)
+            await stream.open_camera(url, extra_cmd="-rtsp_transport tcp")
+            try:
+                stream_reader = await stream.get_reader()
+                response = web.StreamResponse(
+                    status=200,
+                    reason="OK",
+                    headers={"Content-Type": "multipart/x-mixed-replace;boundary=--frame"},
+                )
+                await response.prepare(request)
+                while True:
+                    data = await stream_reader.read_output()
+                    if not data:
+                        break
+                    await response.write(data)
+                return response
+            finally:
+                await stream.close()
+        except Exception as err:
+            _LOGGER.debug("Error handling async mjpeg stream: %s", err)
+            return None
+

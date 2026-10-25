@@ -86,4 +86,34 @@
 - **Single-Click Removal**: Providing a dropdown populated with existing contact keys for the `remove_contact` step allows clean removal without requiring manual string manipulation or regex parsing by the user.
 - **Empty State Fallback**: When no contacts are configured, populating `select.rubrica_interni` with a disabled/default choice (`Nessun interfono configurato`) prevents Lovelace select cards from crashing or rendering blank unpopulated dropdowns.
 
+---
+
+## 2026-10-25 — v1.2.0 RTSPS Cloud Stream, Bubble Card UI, Camera Wake Lifecycle & Sidebar Dashboard
+
+### 12. 2-Wire Doorstation Physical Energy Management & Cloud Camera Wake Lifecycle
+- **Physical Invariant**: In 2-wire bus video intercom systems (e.g. AVE `VI2F` / `TS-SMART`), the outdoor doorstation camera and DSP are physically powered down when idle to preserve bus power and thermal limits. Attempting to open the RTSP stream in idle yields `Connection refused`.
+- **API Wake & Teardown**: Calling `POST /smarthome/api/device-monitoring/monitoring` with `action=1` (`monitoringDeviceNumber="1"`) powers up the camera, provisions the active session `callId`, and establishes the live stream. When closing the session, sending `action=3` is mandatory; sending `action=0` fails with cloud error `-1000000400`.
+- **Dynamic Camera Stream Capability**: Expose `CameraEntityFeature.STREAM` and valid RTSP URLs only when `call_state` is `ringing`, `talking`, or `monitoring`; return `None` when idle to prevent stream workers from failing repeatedly.
+
+### 13. Mobile Companion App WebView Cache Bypass & Storage Resource Registration
+- **Trap**: Mobile WebViews (iOS WKWebView and Android WebView in Home Assistant Companion App) and Service Workers cache static assets aggressively when served with HTTP caching headers. Query parameters like `?v=1.1.0` are frequently ignored by WebViews if the path segment was previously cached with long-lived max-age headers.
+- **Fix**: Changing the path prefix (e.g., from `/ave_video44_frontend/` to `/ave_video44_card/ave-video44-card.js`) with `cache_headers=False` completely busts the stale WebView cache.
+- **Lovelace Storage Resource Invariant**: In addition to `add_extra_js_url`, programmatically registering the card resource as `res_type: "module"` in `hass.data["lovelace"].resources` ensures the card is recognized across all dashboard types, including storage and YAML modes.
+
+### 14. Intercom Address Book Auto-Discovery & Startup Seeding
+- **Discovery Sources**: Device rosters (`quick-display-device/user-current-home`) contain rich metadata: `extraConfig` holds doorstation relay mappings (`deviceNumber`, `deviceName`), and `deviceIntercomInfo` contains extension codes (`haZone`, `username`).
+- **Zero-Friction Seeding**: Auto-populating `intercom_book` on startup when empty provides immediate plug-and-play functionality for `select.rubrica_interni` and the Lovelace card without requiring user intervention, while `auto_discover` in `OptionsFlow` provides a 1-click refresh mechanism.
+
+### 15. Cloud TLS RTSPS Streaming & FFmpeg MJPEG Proxy Invariants
+- **Port and Auth Split**: AVE/GVS cloud streaming provides RTSPS endpoints over port 8322 (`ports.rtsps: 8322`) requiring cloud basic authentication credentials (`auth.basic.username`, `auth.basic.password`).
+- **Dynamic Session Synchronization**: The server path `/stream/1/{deviceId}/0/{targetNum}` or MQTT `"code": "monitoring"` `serverUrl` must be dynamically resolved when `call_state` transitions into `monitoring` or `ringing`.
+- **FFmpeg Stream Proxying**: Calling `async_camera_image` or `handle_async_mjpeg_stream` when the camera is powered down causes FFmpeg subprocesses to continuously fail and generate connection refused error logs. Explicitly returning `None` when `stream_source()` is `None` ensures clean Home Assistant logs while still allowing instant on-demand proxying when active.
+
+### 16. Bubble Card UI Design, Customizable Title & Responsive Panel Constraints
+- **Visual Ergonomics**: Standard HA Lovelace cards often look rigid. Implementing Bubble Card conventions (pill containers with `border-radius: 28px`, circular icon bubbles inside full-pill buttons `.bubble-pill-btn`, floating state badge) creates an intuitive, tactile experience on mobile and touchscreens.
+- **Customizable Title Invariant**: Exposing `config.title` both in YAML and in `getConfigElement()` (`ave-video44-card-editor`) gives users full control over dashboard branding while defaulting sensibly to `"AVE Video V44"`.
+- **Panel Mode Overflow Guard**: In full panel dashboards (`type: "panel"`), elements can stretch excessively on ultra-wide desktop monitors. Clamping the card container to `max-width: 780px` with `margin: 0 auto` and `repeat(auto-fit, minmax(200px, 1fr))` ensures aesthetic balance across all form factors.
+
+
+
 
