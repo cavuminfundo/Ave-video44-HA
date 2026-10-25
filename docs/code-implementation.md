@@ -445,5 +445,11 @@ Because Home Assistant typically resides behind home router NATs:
 - **Non-Blocking SDP Descriptors**: Ephemeral SDP descriptor files required by internal media parsers are created via `asyncio.to_thread` execution, eliminating Home Assistant event loop blocking warnings during SIP media session bootstrap.
 - **Intercom Self-URI Isolation**: Device discovery examines the monitor's own SIP proxy address and excludes it from `select.rubrica_interni`. This prevents loopback entries where a monitor calls itself, preserving valid 2-wire hardware bus extension codes (`001-0002`, `001-0004`) for inter-apartment intercom calling even when cloud APIs return `associatedCommunityStatus: -1`.
 
+### 14.8 Pipelined TCP SIP Parsing, Concurrent Wake Lock & Blob URL Frame Loop
+- **Pipelined TCP Parser (`_read_sip_msg`)**: In stream-based TCP transport, OpenSIPS may transmit provisional responses (`100 Giving it a try`, `180 Ringing`) and the final response (`200 OK`) in a single packet. `CloudSipMediaSession` maintains a persistent instance bytearray buffer across reads, preserving remainder bytes past `content-length` so successive SIP messages are parsed in order without dropping the dialog completion response.
+- **Concurrent Wake Lock**: An `asyncio.Lock` serializes calls to `async_wake_camera`, preventing duplicate OpenSIPS connections and race conditions when users tap the wake button repeatedly.
+- **Mobile WebView Blob URL Frame Loop**: In mobile companion apps (Android/iOS) and VPN tunnels, continuous `multipart/x-mixed-replace` streams often fail to fire `onload` events on hidden `<img>` tags. The frontend replaces native multipart parsing with an explicit asynchronous `fetch` -> `Blob` -> `URL.createObjectURL` pipeline targeting `/api/camera_proxy/`, continuously updating image source URLs and revoking old blob handles to eliminate black screen lockups.
+
+
 
 

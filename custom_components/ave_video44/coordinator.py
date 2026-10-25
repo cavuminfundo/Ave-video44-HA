@@ -55,6 +55,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.sip_session = AveSipSession()
         self.cloud_sip_sessions: Dict[str, CloudSipMediaSession] = {}
         self._wake_events: Dict[str, asyncio.Event] = {}
+        self._wake_lock = asyncio.Lock()
         self.mqtt_listener: Optional[AveMqttListener] = None
 
         self.devices: List[Dict[str, Any]] = []
@@ -147,6 +148,16 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         """Initiate outbound intercom call."""
         target = room_code or self.selected_intercom_targets.get(str(device_id), "")
         _LOGGER.debug("Calling intercom target %s from device %s", target, device_id)
+        target_str = str(target).strip()
+        if target_str == "1" or target_str.startswith("1 ") or "citofono" in target_str.lower():
+            await self.async_wake_camera(device_id, monitoring_device_number="1")
+            self.call_state = "monitoring"
+            self.active_device_id = str(device_id)
+            self.active_caller_id = target
+            self.active_caller_name = self.resolve_caller_name(target)
+            self.async_update_listeners()
+            return
+
         self.call_state = "in_call"
         self.active_device_id = str(device_id)
         self.active_caller_id = target
@@ -204,44 +215,55 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
             started_sip = False
             if target_sip_uri and self.api:
-                if dev_str in self.cloud_sip_sessions:
-                    old_sess = self.cloud_sip_sessions.pop(dev_str)
-                    try:
-                        await old_sess.async_stop()
-                    except Exception:
-                        pass
+                async with self._wake_lock:
+                    if dev_str in self.cloud_sip_sessions and self.cloud_sip_sessions[dev_str].is_active:
+                        self.active_rtsp_url = None
+                        self.active_device_id = dev_str
+                        self.call_state = "monitoring"
+                        self.async_update_listeners()
+                        return target_sip_uri
 
-                try:
-                    sip_acct = await self.api.get_sip_account(dev_str)
-                    if isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password"):
-                        user_id = str(
-                            (dev.get("userId") if dev else None)
-                            or (dev.get("createUser") if dev else None)
-                            or (self.entry.data.get("user_id") if getattr(self, "entry", None) and getattr(self.entry, "data", None) else None)
-                            or "34964"
-                        )
-                        ffmpeg_bin = "ffmpeg"
+                    if dev_str in self.cloud_sip_sessions:
+                        old_sess = self.cloud_sip_sessions.pop(dev_str)
                         try:
-                            from homeassistant.components.ffmpeg import DATA_FFMPEG
-                            if hasattr(self, "hass") and self.hass and DATA_FFMPEG in self.hass.data:
-                                ffmpeg_bin = getattr(self.hass.data[DATA_FFMPEG], "binary", "ffmpeg")
+                            await old_sess.async_stop()
                         except Exception:
                             pass
 
-                        session = CloudSipMediaSession(
-                            device_id=dev_str,
-                            sip_username=str(sip_acct["username"]),
-                            sip_password=str(sip_acct["password"]),
-                            target_sip_uri=target_sip_uri,
-                            user_id=user_id,
-                            target_device_num=str(mon_num or "1"),
-                            sender_name="Citofono",
-                            ffmpeg_binary=ffmpeg_bin,
-                        )
-                        self.cloud_sip_sessions[dev_str] = session
-                        started_sip = await session.async_start()
-                except Exception as sip_err:
-                    _LOGGER.debug("Could not start CloudSipMediaSession: %s", sip_err)
+                    try:
+                        sip_acct = await self.api.get_sip_account(dev_str)
+                        if isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password"):
+                            user_id = str(
+                                (dev.get("userId") if dev else None)
+                                or (dev.get("createUser") if dev else None)
+                                or (self.entry.data.get("user_id") if getattr(self, "entry", None) and getattr(self.entry, "data", None) else None)
+                                or "34964"
+                            )
+                            ffmpeg_bin = "ffmpeg"
+                            try:
+                                from homeassistant.components.ffmpeg import DATA_FFMPEG
+                                if hasattr(self, "hass") and self.hass and DATA_FFMPEG in self.hass.data:
+                                    ffmpeg_bin = getattr(self.hass.data[DATA_FFMPEG], "binary", "ffmpeg")
+                            except Exception:
+                                pass
+
+                            session = CloudSipMediaSession(
+                                device_id=dev_str,
+                                sip_username=str(sip_acct["username"]),
+                                sip_password=str(sip_acct["password"]),
+                                target_sip_uri=target_sip_uri,
+                                user_id=user_id,
+                                target_device_num=str(mon_num or "1"),
+                                sender_name="Citofono",
+                                ffmpeg_binary=ffmpeg_bin,
+                            )
+                            self.cloud_sip_sessions[dev_str] = session
+                            started_sip = await session.async_start()
+                            if not started_sip:
+                                self.cloud_sip_sessions.pop(dev_str, None)
+                    except Exception as sip_err:
+                        self.cloud_sip_sessions.pop(dev_str, None)
+                        _LOGGER.debug("Could not start CloudSipMediaSession: %s", sip_err)
 
             if started_sip:
                 self.active_rtsp_url = None

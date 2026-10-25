@@ -313,6 +313,7 @@ class CloudSipMediaSession:
         self.is_active: bool = False
 
         self._mjpeg_buf = bytearray()
+        self._rx_buf = bytearray()
         self._sdp_path: Optional[str] = None
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
@@ -325,6 +326,8 @@ class CloudSipMediaSession:
         self._local_ip: str = "127.0.0.1"
         self._call_id: Optional[str] = None
         self._from_tag: Optional[str] = None
+        self._reg_call_id: Optional[str] = None
+        self._reg_tag: Optional[str] = None
         self._contact_uri: Optional[str] = None
         self._route_headers: List[str] = []
 
@@ -427,13 +430,16 @@ class CloudSipMediaSession:
 
     def build_register_packet(self, cseq: int = 1, auth: Optional[str] = None) -> str:
         """Build SIP REGISTER packet."""
-        call_id = f"reg-{self.device_id}-{uuid.uuid4().hex[:8]}@avev44"
+        if not self._reg_call_id:
+            self._reg_call_id = f"reg-{self.device_id}-{uuid.uuid4().hex[:8]}@avev44"
+        if not self._reg_tag:
+            self._reg_tag = uuid.uuid4().hex[:8]
         lines = [
             f"REGISTER sip:{self._sip_domain} SIP/2.0",
             f"Via: SIP/2.0/TCP {self._local_ip}:5060;branch=z9hG4bK-reg-{cseq}",
             f"To: <sip:{self._sip_user}@{self._sip_domain}>",
-            f"From: <sip:{self._sip_user}@{self._sip_domain}>;tag={uuid.uuid4().hex[:8]}",
-            f"Call-ID: {call_id}",
+            f"From: <sip:{self._sip_user}@{self._sip_domain}>;tag={self._reg_tag}",
+            f"Call-ID: {self._reg_call_id}",
             f"CSeq: {cseq} REGISTER",
             f"Contact: <sip:{self._sip_user}@{self._local_ip}:5060;transport=tcp>",
             "Expires: 3600",
@@ -459,19 +465,26 @@ class CloudSipMediaSession:
         """Build outbound SIP INVITE with 14 custom headers and SRTP SDP."""
         cid = call_id or self._call_id or f"inv-{self.device_id}-{uuid.uuid4().hex[:8]}@avev44"
         self._call_id = cid
+        iot_call_id = f"{self.user_id}{int(time.time() * 1000)}"
         sdp = (
             "v=0\r\n"
-            f"o={self.user_id} 1000 1000 IN IP4 {local_ip}\r\n"
-            "s=AVE Video V44 Cloud\r\n"
+            f"o={self._sip_user} 1234 1234 IN IP4 {local_ip}\r\n"
+            "s=Talk\r\n"
             f"c=IN IP4 {local_ip}\r\n"
             "t=0 0\r\n"
-            f"m=audio {audio_port} RTP/SAVP 8\r\n"
+            f"m=audio {audio_port} RTP/SAVP 0 8 101\r\n"
+            "a=rtpmap:0 PCMU/8000\r\n"
             "a=rtpmap:8 PCMA/8000\r\n"
+            "a=rtpmap:101 telephone-event/8000\r\n"
+            "a=fmtp:101 0-15\r\n"
             f"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{srtp_audio_key}\r\n"
+            f"a=crypto:2 AES_CM_128_HMAC_SHA1_32 inline:{srtp_audio_key}\r\n"
             "a=sendrecv\r\n"
             f"m=video {video_port} RTP/SAVP 96\r\n"
             "a=rtpmap:96 H264/90000\r\n"
+            "a=fmtp:96 profile-level-id=42801F\r\n"
             f"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{srtp_video_key}\r\n"
+            f"a=crypto:2 AES_CM_128_HMAC_SHA1_32 inline:{srtp_video_key}\r\n"
             "a=sendrecv\r\n"
         )
         sdp_bytes = sdp.encode("utf-8")
@@ -492,8 +505,8 @@ class CloudSipMediaSession:
             f"senderId: {self.user_id}",
             "senderType: 3",
             f"senderName: {self.sender_name}",
-            f"targetId: {self.device_id}",
-            f"callId: {cid}",
+            f"targetId: {self.target_device_num}",
+            f"callId: {iot_call_id}",
             "targetType: 1",
             "enableVideo: 1",
             "enableAudio: 1",
@@ -555,20 +568,19 @@ class CloudSipMediaSession:
         return self.frame_seq, self.latest_frame
 
     async def _read_sip_msg(self) -> Tuple[str, Dict[str, str], str]:
-        """Read a complete SIP message over TCP stream."""
+        """Read a complete SIP message over TCP stream without losing concatenated frames."""
         if not self._reader:
             raise ConnectionResetError("Reader not connected")
-        data = bytearray()
-        while True:
-            chunk = await self._reader.read(1024)
+        while b"\r\n\r\n" not in self._rx_buf:
+            chunk = await self._reader.read(4096)
             if not chunk:
                 raise ConnectionResetError("SIP connection closed by remote server")
-            data.extend(chunk)
-            idx = data.find(b"\r\n\r\n")
-            if idx != -1:
-                break
-        header_bytes = bytes(data[:idx])
-        body_remainder = bytes(data[idx + 4:])
+            self._rx_buf.extend(chunk)
+
+        idx = self._rx_buf.find(b"\r\n\r\n")
+        header_bytes = bytes(self._rx_buf[:idx])
+        del self._rx_buf[: idx + 4]
+
         header_text = header_bytes.decode("utf-8", errors="replace")
         lines = header_text.split("\r\n")
         start_line = lines[0]
@@ -577,16 +589,17 @@ class CloudSipMediaSession:
             if ":" in line:
                 k, v = line.split(":", 1)
                 headers[k.strip().lower()] = v.strip()
+
         content_len = int(headers.get("content-length", 0))
-        needed = content_len - len(body_remainder)
-        body_bytes = bytearray(body_remainder)
-        while needed > 0:
-            chunk = await self._reader.read(min(needed, 4096))
+        while len(self._rx_buf) < content_len:
+            chunk = await self._reader.read(4096)
             if not chunk:
                 break
-            body_bytes.extend(chunk)
-            needed -= len(chunk)
-        body_text = bytes(body_bytes).decode("utf-8", errors="replace")
+            self._rx_buf.extend(chunk)
+
+        body_bytes = bytes(self._rx_buf[:content_len])
+        del self._rx_buf[:content_len]
+        body_text = body_bytes.decode("utf-8", errors="replace")
         return start_line, headers, body_text
 
     async def _ffmpeg_stdout_loop(self) -> None:
@@ -951,6 +964,10 @@ class CloudSipMediaSession:
 
             await asyncio.to_thread(_remove_sdp_file, self._sdp_path)
             self._sdp_path = None
+
+        self._rx_buf.clear()
+        self._reg_call_id = None
+        self._reg_tag = None
 
         if self.on_terminated:
             try:

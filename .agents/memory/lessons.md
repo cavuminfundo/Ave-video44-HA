@@ -154,6 +154,20 @@
 - Community Status Invariant: In standalone residential installations, the AVE/GVS cloud REST API returns `associatedCommunityStatus: -1` when indoor monitors are not registered to an enterprise multi-tenant cloud community. In this configuration, extension numbers (such as `001-0002` and `001-0004`) exist solely on the local 2-wire hardware bus rather than the cloud database.
 - Self-URI Filtering: Intercom auto-discovery must filter out the indoor monitor's own SIP proxy URI to prevent confusing self-calling loopback options in `select.rubrica_interni`. Local bus extension codes must be preserved in the address book for direct `HOUSETOHOUSE` intercom calling.
 
+---
+
+## 2026-10-25 — v1.2.4 Pipelined TCP SIP Framing & Mobile WebView Blob URL Rendering
+
+### 23. Pipelined TCP SIP Parsing & Stream Buffer Preservation
+- Invariant: When communicating with OpenSIPS or SIP proxies over stream-oriented TCP, responses can be concatenated into a single TCP packet or stream read (e.g., `SIP/2.0 100 Giving it a try`, `SIP/2.0 180 Ringing`, and `SIP/2.0 200 OK` packed together).
+- Pipelining Bug: A naive parser that reads until `\r\n\r\n` plus `Content-Length` and discards unparsed remainder bytes drops the subsequent provisional and final status messages, causing the client to hang waiting for `200 OK` until timeout.
+- Fix: The SIP TCP reader must maintain an internal carry-over buffer across successive `_read_sip_msg()` calls, consuming only the current message headers + body and leaving remaining bytes for the next read invocation.
+
+### 24. Mobile WebView / VPN Multipart Limitations & Blob URL Frame Loop
+- Invariant: Mobile WebViews (especially Android system WebView in the Home Assistant Companion App) and connections traversing VPN tunnels (WireGuard, Tailscale) frequently mishandle `multipart/x-mixed-replace` on standard HTML `<img>` tags. The browser engine does not reliably trigger `onload` events for streaming multipart boundaries when hidden or when frame timing fluctuates, leaving video viewports completely black.
+- Fix: Driving camera frames via an explicit asynchronous loop (`fetch` -> `response.blob()` -> `URL.createObjectURL(blob)`) provides rock-solid frame delivery across all mobile WebViews and network topologies, with `URL.revokeObjectURL(oldUrl)` preventing memory leaks.
+
+
 
 
 

@@ -165,7 +165,7 @@ custom_components/ave_video44/
 - **Responsive Layout**: Desktop auto-fit grid and mobile view constrained to `max-width: 780px` in panel view.
 - **Zero-YAML Injection & Anti-Cache Endpoint**: `card_loader.py` serves the card at `/ave_video44_card/ave-video44-card.js?v={VERSION}` with `cache_headers=False` (with backwards-compatible alias at `/ave_video44_frontend/`) and programmatically inserts it as a JavaScript module into Home Assistant's Lovelace resource storage (`lovelace.resources`) and `add_extra_js_url`. This bypasses aggressive mobile WebView / Service Worker caching.
 - **Entity Auto-Discovery**: Implements `getStubConfig(hass, entities, [entity])` and `_autoResolveEntities` to automatically scan the Home Assistant entity registry for AVE cameras, locks, doorbell sensors, and address book selectors, populating card fields instantly when added via the visual card picker.
-- **On-Demand Camera Wake Control**: The Lovelace card includes an idle `"Attiva Video"` (`#btnMonitor`) button that wakes 2-wire cameras via WebSocket action `monitor`.
+- **On-Demand Camera Wake Control & Blob URL Frame Loop**: The Lovelace card includes an idle `"Attiva Video"` (`#btnMonitor`) button that wakes 2-wire cameras via WebSocket action `monitor`, and streams video frames using an asynchronous `fetch` -> `Blob` -> `URL.createObjectURL` pipeline for reliable display on Android/iOS WebViews and VPN tunnels.
 
 ### 3.9 Guided Intercom Configuration Flow (`config_flow.py`)
 - **Guided OptionsFlow Wizard**: Multi-step interactive flow with dedicated sub-dialogs:

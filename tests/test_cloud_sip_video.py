@@ -365,6 +365,12 @@ def test_cloud_sip_digest_auth_and_packet_construction():
     assert "CSeq: 1 REGISTER\r\n" in reg_pkt
     assert "Content-Length: 0\r\n\r\n" in reg_pkt
 
+    # CSeq 2 retains the exact same Call-ID and tag
+    reg_pkt_2 = session.build_register_packet(cseq=2, auth="test_auth")
+    assert f"Call-ID: {session._reg_call_id}" in reg_pkt_2
+    assert f"tag={session._reg_tag}" in reg_pkt_2
+    assert "CSeq: 2 REGISTER\r\n" in reg_pkt_2
+
     # 4. Build INVITE packet with 14 custom headers & SRTP crypto SDP
     srtp_audio_key = "aXVsaWFuMTIzNDU2Nzg5MDEyMzQ1Njc4OTA="
     srtp_video_key = "dmlkZW8xMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
@@ -386,7 +392,7 @@ def test_cloud_sip_digest_auth_and_packet_construction():
     assert "senderId: 34964" in invite_pkt
     assert "senderType: 3" in invite_pkt
     assert "senderName: Citofono" in invite_pkt
-    assert "targetId: 677771932745207808" in invite_pkt
+    assert "targetId: 1" in invite_pkt
     assert "callId:" in invite_pkt
     assert "targetType: 1" in invite_pkt
     assert "enableVideo: 1" in invite_pkt
@@ -394,11 +400,18 @@ def test_cloud_sip_digest_auth_and_packet_construction():
     assert "proxyDeviceId: 677771932745207808" in invite_pkt
     assert "proxyFlag: 1" in invite_pkt
 
-    # Check SDP
-    assert "m=audio 18302 RTP/SAVP 8" in invite_pkt
+    # Check dual-codec SDP
+    assert "m=audio 18302 RTP/SAVP 0 8 101" in invite_pkt
+    assert "a=rtpmap:0 PCMU/8000" in invite_pkt
+    assert "a=rtpmap:8 PCMA/8000" in invite_pkt
+    assert "a=rtpmap:101 telephone-event/8000" in invite_pkt
     assert f"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{srtp_audio_key}" in invite_pkt
+    assert f"a=crypto:2 AES_CM_128_HMAC_SHA1_32 inline:{srtp_audio_key}" in invite_pkt
     assert "m=video 18304 RTP/SAVP 96" in invite_pkt
+    assert "a=rtpmap:96 H264/90000" in invite_pkt
+    assert "a=fmtp:96 profile-level-id=42801F" in invite_pkt
     assert f"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{srtp_video_key}" in invite_pkt
+    assert f"a=crypto:2 AES_CM_128_HMAC_SHA1_32 inline:{srtp_video_key}" in invite_pkt
 
 
 def test_cloud_sip_parse_200_ok_sdp_and_local_sdp():
@@ -659,4 +672,46 @@ def test_extract_discovered_intercoms_excludes_own_monitor(mock_coordinator):
     discovered = mock_coordinator._extract_discovered_intercoms_from_devices([dev])
     assert "sip:2114136144349364224@eu.open-sips.gvs-icloud.com" not in discovered
     assert "sip:2114136144349364999@eu.open-sips.gvs-icloud.com" in discovered
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_read_concatenated_sip_messages():
+    """Verify _read_sip_msg buffers TCP chunks and does not lose concatenated SIP messages."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    session = CloudSipMediaSession(
+        device_id="677771932745207808",
+        sip_username="sip:2114136144349364224@eu.open-sips.gvs-icloud.com",
+        sip_password="password",
+        target_sip_uri="sip:2114136144349364225@eu.open-sips.gvs-icloud.com",
+    )
+
+    sdp_body = "v=0\r\no=Talk 1 1 IN IP4 1.2.3.4\r\ns=Talk\r\n"
+    stream_data = (
+        b"SIP/2.0 100 Giving it a try\r\n"
+        b"Via: SIP/2.0/TCP 192.168.1.50:5060\r\n"
+        b"Content-Length: 0\r\n\r\n"
+        b"SIP/2.0 200 OK\r\n"
+        b"Content-Type: application/sdp\r\n"
+        + f"Content-Length: {len(sdp_body)}\r\n\r\n".encode("utf-8")
+        + sdp_body.encode("utf-8")
+    )
+
+    chunks = [stream_data, b""]
+    mock_reader = AsyncMock()
+    mock_reader.read = AsyncMock(side_effect=lambda n: chunks.pop(0) if chunks else b"")
+    session._reader = mock_reader
+
+    # Read first message: 100 Giving it a try
+    start_line_1, headers_1, body_1 = await session._read_sip_msg()
+    assert start_line_1 == "SIP/2.0 100 Giving it a try"
+    assert headers_1.get("content-length") == "0"
+    assert body_1 == ""
+
+    # Read second message: 200 OK (should be read from persistent buffer, NOT lost!)
+    start_line_2, headers_2, body_2 = await session._read_sip_msg()
+    assert start_line_2 == "SIP/2.0 200 OK"
+    assert headers_2.get("content-type") == "application/sdp"
+    assert body_2 == sdp_body
+
 

@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.2.3";
+const CARD_VERSION = "1.2.4";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -19,6 +19,9 @@ class AveVideo44Card extends HTMLElement {
     this._lastStateSignature = "";
     this._autoAnswerChecked = false;
     this._boundKeyDown = this._handleKeyDown.bind(this);
+    this._framePollTimer = null;
+    this._fetchingFrame = false;
+    this._lastBlobUrl = null;
   }
 
   static async getConfigElement() {
@@ -200,7 +203,7 @@ class AveVideo44Card extends HTMLElement {
       if (this._callState !== "talking" && this._callState !== "ringing") {
         this._setCallState("ringing");
       }
-    } else if (callSensorState === "talking") {
+    } else if (callSensorState === "talking" || callSensorState === "in_call") {
       if (this._callState !== "talking") {
         this._setCallState("talking");
       }
@@ -695,6 +698,81 @@ class AveVideo44Card extends HTMLElement {
     }
   }
 
+  _stopFramePolling() {
+    if (this._framePollTimer) {
+      clearInterval(this._framePollTimer);
+      this._framePollTimer = null;
+    }
+    this._fetchingFrame = false;
+    if (this._lastBlobUrl) {
+      try {
+        URL.revokeObjectURL(this._lastBlobUrl);
+      } catch (_) {}
+      this._lastBlobUrl = null;
+    }
+    const shadow = this.shadowRoot;
+    if (shadow) {
+      const cameraStreamImg = shadow.getElementById("cameraStreamImg");
+      const videoPlaceholder = shadow.getElementById("videoPlaceholder");
+      if (cameraStreamImg) {
+        cameraStreamImg.classList.add("hidden");
+        cameraStreamImg.removeAttribute("src");
+      }
+      if (videoPlaceholder) {
+        videoPlaceholder.classList.remove("hidden");
+      }
+    }
+  }
+
+  _startFramePolling() {
+    if (this._framePollTimer) return;
+    const pollFrame = async () => {
+      const isVideoActive = Boolean(this._callState === "monitoring" || this._callState === "talking" || this._callState === "ringing");
+      if (!isVideoActive || this._fetchingFrame || !this._config || !this._hass) return;
+      const cameraEntity = this._config.entity || this._config.camera_entity;
+      if (!cameraEntity || !this._hass.states || !this._hass.states[cameraEntity]) return;
+
+      const token = (this._hass.states[cameraEntity].attributes && this._hass.states[cameraEntity].attributes.access_token) ? this._hass.states[cameraEntity].attributes.access_token : "";
+      const url = "/api/camera_proxy/" + cameraEntity + "?token=" + token + "&t=" + Date.now();
+
+      this._fetchingFrame = true;
+      try {
+        const resp = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        if (resp && resp.ok) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 1000) {
+            const objUrl = URL.createObjectURL(blob);
+            if (this._lastBlobUrl) {
+              try {
+                URL.revokeObjectURL(this._lastBlobUrl);
+              } catch (_) {}
+            }
+            this._lastBlobUrl = objUrl;
+            const shadow = this.shadowRoot;
+            if (shadow) {
+              const cameraStreamImg = shadow.getElementById("cameraStreamImg");
+              const videoPlaceholder = shadow.getElementById("videoPlaceholder");
+              if (cameraStreamImg) {
+                cameraStreamImg.src = objUrl;
+                cameraStreamImg.classList.remove("hidden");
+                cameraStreamImg.style.opacity = "1";
+              }
+              if (videoPlaceholder) {
+                videoPlaceholder.classList.add("hidden");
+              }
+            }
+          }
+        }
+      } catch (_) {
+      } finally {
+        this._fetchingFrame = false;
+      }
+    };
+
+    pollFrame();
+    this._framePollTimer = setInterval(pollFrame, 200);
+  }
+
   _updateView() {
     const shadow = this.shadowRoot;
     if (!shadow) return;
@@ -713,15 +791,7 @@ class AveVideo44Card extends HTMLElement {
     const cameraEntity = this._config.entity || this._config.camera_entity;
     const isVideoActive = Boolean(this._callState === "monitoring" || this._callState === "talking" || this._callState === "ringing");
     if (isVideoActive && cameraEntity && this._hass && this._hass.states[cameraEntity]) {
-      const token = this._hass.states[cameraEntity].attributes ? this._hass.states[cameraEntity].attributes.access_token : "";
-      let streamUrl = token
-        ? `/api/camera_proxy_stream/${cameraEntity}?token=${token}`
-        : `/api/camera_proxy/${cameraEntity}`;
-
-      if (this._inCall || this._callState === "monitoring") {
-        streamUrl = streamUrl + `&t=${Date.now()}`;
-      }
-
+      this._startFramePolling();
       if (cameraStreamImg) {
         if (!this._streamImgBound) {
           this._streamImgBound = true;
@@ -729,37 +799,8 @@ class AveVideo44Card extends HTMLElement {
           cameraStreamImg.onerror = () => {
             if (this._inCall && this._imgRetryCount < 8) {
               this._imgRetryCount++;
-              if (videoPlaceholder) {
-                videoPlaceholder.classList.remove("hidden");
-                if (placeholderText) {
-                  placeholderText.textContent = "Aggancio flusso video in corso...";
-                }
-              }
-              cameraStreamImg.classList.add("hidden");
-              if (this._imgRetryTimer) {
-                clearTimeout(this._imgRetryTimer);
-              }
-              this._imgRetryTimer = setTimeout(() => {
-                if (this._inCall && cameraStreamImg) {
-                  const base = cameraStreamImg.src ? cameraStreamImg.src.split("&t=")[0] : "";
-                  if (base) {
-                    cameraStreamImg.src = `${base}&t=${Date.now()}`;
-                  }
-                }
-              }, 1500);
             }
           };
-          cameraStreamImg.onload = () => {
-            this._imgRetryCount = 0;
-            if (videoPlaceholder) {
-              videoPlaceholder.classList.add("hidden");
-            }
-            cameraStreamImg.classList.remove("hidden");
-            cameraStreamImg.style.opacity = "1";
-          };
-        }
-        if (cameraStreamImg.src !== streamUrl) {
-          cameraStreamImg.src = streamUrl;
         }
       }
       if (liveVideo) {
@@ -770,6 +811,7 @@ class AveVideo44Card extends HTMLElement {
         }
       }
     } else {
+      this._stopFramePolling();
       if (cameraStreamImg) {
         cameraStreamImg.classList.add("hidden");
         cameraStreamImg.removeAttribute("src");
@@ -791,10 +833,10 @@ class AveVideo44Card extends HTMLElement {
       callerBanner.classList.remove("hidden");
       const btnAnswer = shadow.getElementById("btnAnswer");
       if (btnAnswer) {
-        if (this._callState === "monitoring") {
-          btnAnswer.classList.add("hidden");
-        } else {
+        if (this._callState === "ringing") {
           btnAnswer.classList.remove("hidden");
+        } else {
+          btnAnswer.classList.add("hidden");
         }
       }
       const hangupLabel = shadow.getElementById("hangupLabel");
@@ -945,7 +987,8 @@ class AveVideo44Card extends HTMLElement {
     const target = selectEl ? selectEl.value : "";
     if (!target || !this._hass) return;
 
-    if (target === "1") {
+    const cleanCode = target.split("(")[0].trim();
+    if (cleanCode === "1" || target.toLowerCase().indexOf("citofono") !== -1) {
       this._monitor();
       return;
     }
@@ -1088,6 +1131,7 @@ class AveVideo44Card extends HTMLElement {
   }
 
   _cleanupCall() {
+    this._stopFramePolling();
     if (this._imgRetryTimer) {
       clearTimeout(this._imgRetryTimer);
       this._imgRetryTimer = null;

@@ -16,6 +16,30 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.4 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Pipelined TCP SIP Parser & Concurrent Wake Lock**:
+  - Fixed TCP framing bug in `CloudSipMediaSession._read_sip_msg()` that dropped subsequent SIP frames when multiple messages (`100 Giving it a try`, `180 Ringing`, and `200 OK`) arrived packed in the same TCP segment.
+  - Maintained consistent `Call-ID` and `tag` values across SIP `REGISTER` challenges and authentication responses.
+  - Introduced an `asyncio.Lock` in `async_wake_camera` to serialize concurrent OpenSIPS connection attempts from rapid button taps.
+- **Mobile WebView / VPN Frame Loop & Outbound Intercom Routing**:
+  - Replaced native `multipart/x-mixed-replace` on `<img class="hidden">` with an asynchronous `fetch` -> `Blob` -> `URL.createObjectURL` frame loop against `/api/camera_proxy/`, eliminating black screen stalls on Android WebView / iOS Companion apps and WireGuard/Tailscale VPN connections where `onload` failed to fire.
+  - Fixed intercom call button target matching for entries formatted like `"1 (Citofono)"` in `select.rubrica_interni`.
+  - Hidden the *"Rispondi"* (Answer) button during outgoing call states (`call_state === "ringing"` when initiated locally).
+
+### 🇮🇹 Italiano
+
+- **Parser SIP TCP Pipelined e Lock di Risveglio Concorrente**:
+  - Risolto il bug di framing TCP in `CloudSipMediaSession._read_sip_msg()` che scartava i messaggi SIP successivi quando `100 Giving it a try`, `180 Ringing` e `200 OK` giungevano concatenati all'interno del medesimo segmento TCP.
+  - Mantenuti `Call-ID` e `tag` coerenti durante la procedura di challenge-response per la registrazione SIP (`REGISTER`).
+  - Introdotto un `asyncio.Lock` in `async_wake_camera` per serializzare i tentativi di connessione concorrenti verso OpenSIPS a fronte di tocchi rapidi e ripetuti.
+- **Rendering Frame Loop con Blob URL per WebView Mobile/VPN e Routing Interfono in Uscita**:
+  - Sostituito lo streaming diretto `multipart/x-mixed-replace` su tag `<img class="hidden">` con un loop asincrono `fetch` -> `Blob` -> `URL.createObjectURL` su `/api/camera_proxy/`, risolvendo il problema del riquadro nero su Android WebView, iOS Companion app e VPN (WireGuard/Tailscale) in cui l'evento `onload` non veniva scatenato.
+  - Corretto il parsing dell'estensione citofonica per voci di rubrica con formato `"1 (Citofono)"` sul pulsante *Chiama*.
+  - Nascosto il pulsante *Rispondi* durante le chiamate in uscita avviate dalla postazione interna.
+
 ## v1.2.3 — 2026-10-25
 
 ### 🇬🇧 English
