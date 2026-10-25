@@ -308,6 +308,20 @@ def test_card_wcag_aa_contrast_ratios():
     assert cr_action_emerald >= 3.0, f"accent_answer on bg_primary UI component ratio {cr_action_emerald:.2f} < 3.0"
 
 
+def test_card_intercom_call_button_toggles_to_hangup_in_call():
+    """Verify #btnCallIntercom switches to hangup button and disables #intercomSelect during active call."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    assert 'id="callIntercomIcon"' in content
+    assert 'id="callIntercomLabel"' in content
+    assert "intercomSelect.disabled = true" in content
+    assert 'btnCallIntercom.className = "btn-hangup"' in content
+    assert 'callIntercomIcon.setAttribute("icon", "mdi:phone-hangup")' in content
+    call_body = content.split("async _callIntercom()")[1].split("_arrayBufferToBase64")[0]
+    assert "this._inCall" in call_body and "this._hangup()" in call_body, (
+        "_callIntercom must check this._inCall and trigger this._hangup() instead of starting a duplicate call"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test Suite 3: Brand PNG Assets Validation
 # ---------------------------------------------------------------------------

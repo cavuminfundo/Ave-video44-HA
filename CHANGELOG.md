@@ -16,6 +16,22 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.7 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Dynamic Intercom Call Button & Hangup Toggle**:
+  - Dynamically switches the intercom call button (`#btnCallIntercom`, "Chiama") into a red hangup button ("Chiudi" / "Termina" / "Rifiuta") during active call or monitoring sessions (`_inCall`).
+  - Pressing the button while in a call triggers `_hangup()`, preventing accidental duplicate call requests.
+  - Automatically disables the intercom address book selector (`#intercomSelect`) during active sessions and disables both controls during the connection phase (`loading`).
+
+### 🇮🇹 Italiano
+
+- **Commutazione Dinamica Tasto Chiamata Intercom e Chiusura**:
+  - Commutazione dinamica del pulsante `#btnCallIntercom` ("Chiama") in un pulsante rosso di chiusura ("Chiudi" / "Termina" / "Rifiuta") durante una chiamata o sessione di monitoraggio attiva (`_inCall`).
+  - La pressione del pulsante durante la chiamata invoca `_hangup()`, prevenendo l'invio accidentale di chiamate duplicate.
+  - Disabilitazione automatica del selettore rubrica `#intercomSelect` durante le sessioni attive e disabilitazione di entrambi i controlli durante la fase di connessione (`loading`).
+
 ## v1.2.6 — 2026-10-25
 
 ### 🇬🇧 English

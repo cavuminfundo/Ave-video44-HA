@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.2.6";
+const CARD_VERSION = "1.2.7";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -536,6 +536,12 @@ class AveVideo44Card extends HTMLElement {
           box-shadow: 0 0 0 2px var(--ave-focus-ring);
         }
 
+        select:disabled,
+        button:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+
         .hidden {
           display: none !important;
         }
@@ -625,8 +631,8 @@ class AveVideo44Card extends HTMLElement {
             <label for="intercomSelect" class="sr-only" style="display:none">Rubrica Interni</label>
             <select id="intercomSelect" aria-label="Seleziona interno per chiamata"></select>
             <button id="btnCallIntercom" class="btn-blue" aria-label="Avvia chiamata all'interno selezionato">
-              <span class="btn-icon-bubble"><ha-icon icon="mdi:phone-outgoing"></ha-icon></span>
-              <span>Chiama</span>
+              <span class="btn-icon-bubble"><ha-icon id="callIntercomIcon" icon="mdi:phone-outgoing"></ha-icon></span>
+              <span id="callIntercomLabel">Chiama</span>
             </button>
           </div>
         </div>
@@ -869,6 +875,11 @@ class AveVideo44Card extends HTMLElement {
       }
     }
 
+    const intercomSelect = shadow.getElementById("intercomSelect");
+    const btnCallIntercom = shadow.getElementById("btnCallIntercom");
+    const callIntercomIcon = shadow.getElementById("callIntercomIcon");
+    const callIntercomLabel = shadow.getElementById("callIntercomLabel");
+
     if (this._inCall) {
       container.setAttribute("role", "dialog");
       container.setAttribute("aria-modal", "true");
@@ -884,9 +895,24 @@ class AveVideo44Card extends HTMLElement {
           btnAnswer.classList.add("hidden");
         }
       }
+      const closeLabel = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
       const hangupLabel = shadow.getElementById("hangupLabel");
       if (hangupLabel) {
-        hangupLabel.textContent = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
+        hangupLabel.textContent = closeLabel;
+      }
+      if (intercomSelect) {
+        intercomSelect.disabled = true;
+      }
+      if (btnCallIntercom) {
+        btnCallIntercom.disabled = false;
+        btnCallIntercom.className = "btn-hangup";
+        btnCallIntercom.setAttribute("aria-label", "Chiudi o rifiuta la chiamata");
+      }
+      if (callIntercomIcon) {
+        callIntercomIcon.setAttribute("icon", "mdi:phone-hangup");
+      }
+      if (callIntercomLabel) {
+        callIntercomLabel.textContent = closeLabel;
       }
       if (placeholderText) {
         placeholderText.textContent = "Streaming audio/video in corso";
@@ -898,6 +924,21 @@ class AveVideo44Card extends HTMLElement {
       inCallControls.classList.add("hidden");
       idleControls.classList.remove("hidden");
       callerBanner.classList.add("hidden");
+      const isLoading = (this._callState === "loading");
+      if (intercomSelect) {
+        intercomSelect.disabled = isLoading;
+      }
+      if (btnCallIntercom) {
+        btnCallIntercom.disabled = isLoading;
+        btnCallIntercom.className = "btn-blue";
+        btnCallIntercom.setAttribute("aria-label", "Avvia chiamata all'interno selezionato");
+      }
+      if (callIntercomIcon) {
+        callIntercomIcon.setAttribute("icon", "mdi:phone-outgoing");
+      }
+      if (callIntercomLabel) {
+        callIntercomLabel.textContent = "Chiama";
+      }
       if (placeholderText) {
         if (this._callState === "loading") {
           placeholderText.textContent = "Connessione video al posto esterno in corso...";
@@ -1027,6 +1068,13 @@ class AveVideo44Card extends HTMLElement {
   }
 
   async _callIntercom() {
+    if (this._inCall) {
+      await this._hangup();
+      return;
+    }
+    if (this._callState === "loading") {
+      return;
+    }
     const shadow = this.shadowRoot;
     const selectEl = shadow.getElementById("intercomSelect");
     const target = selectEl ? selectEl.value : "";
