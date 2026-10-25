@@ -16,6 +16,70 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.6 — 2026-10-25
+
+### 🇬🇧 English
+
+- **SIP Session Liveness, Remote BYE Listener & 2-Wire Bus Cooldown**:
+  - Fixed SIP session lockups (`TimeoutError` / `603 Decline`) occurring after closing a video stream or reopening the Android Companion App.
+  - Implemented RTP packet liveness tracking (`last_rtp_ts`) to proactively detect dead media channels.
+  - Added background listener for remote SIP `BYE` messages to promptly terminate sessions when the outdoor station or server ends the dialog.
+  - Added automatic cleanup of orphaned SIP sessions if no client frame reads occur for 20 seconds.
+  - Enforced a mandatory 3.0-second 2-wire bus cooldown interval between consecutive SIP sessions, preventing OpenSIPS re-invite rejections while the physical bus discharges.
+- **Mobile Companion App Lifecycle & Request Abort**:
+  - Eliminated Lovelace *"Configuration error"* (`Errore di configurazione`) dialogs when switching or backgrounding the Android Companion App while video is playing.
+  - Integrated `AbortController` to cancel in-flight HTTP frame fetches immediately upon disconnect.
+  - Hooked `visibilitychange` and `disconnectedCallback` events in `ave-video44-card.js` for graceful session hangup and stream teardown.
+- **15 FPS Smooth Live Video**:
+  - Increased video playback rate from ~3 FPS to a smooth 15 FPS.
+  - Optimized FFmpeg pipeline parameters (`fps=15`, `-fflags nobuffer -flags low_delay`).
+  - Tuned the card's asynchronous frame rendering loop to a 65ms pipelined cadence.
+- **Low-Latency Gate & Door Cold Unlock**:
+  - Drastically reduced cold unlock latency on 2-wire installations by waiting only for the SIP `200 OK` handshake (`wait_for_sip_connected`) followed by a brief 0.35s bus stabilization delay, rather than awaiting full H.264 video frame decoding.
+
+### 🇮🇹 Italiano
+
+- **Tracciamento Liveness SIP, Ascolto BYE Remoto e Cooldown Bus 2 Fili**:
+  - Risolti i blocchi della sessione SIP (`TimeoutError` / `603 Decline`) che si verificavano dopo la chiusura dello stream video o alla riapertura dell'app Android.
+  - Introdotto il tracciamento della liveness dei pacchetti RTP (`last_rtp_ts`) per rilevare tempestivamente la caduta dei canali multimediali.
+  - Implementato l'ascolto in background dei messaggi SIP `BYE` remoti per rilasciare immediatamente il dialogo quando il posto esterno o il server chiudono la chiamata.
+  - Aggiunto l'auto-rilascio delle sessioni orfane dopo 20 secondi di inattività delle letture dei frame da parte dei client.
+  - Introdotto un intervallo di cooldown obbligatorio di 3.0 secondi sul bus 2 fili tra sessioni SIP consecutive, evitando che OpenSIPS rifiuti nuovi inviti mentre il bus fisico si scarica.
+- **Ciclo di Vita Companion App Mobile e Abort delle Richieste**:
+  - Eliminato il popup Lovelace *"Errore di configurazione"* causato dalla chiusura e riapertura dell'app Companion Android durante lo streaming attivo.
+  - Integrato `AbortController` in `ave-video44-card.js` per annullare istantaneamente le richieste HTTP di frame in volo al momento della disconnessione.
+  - Gestiti gli eventi `visibilitychange` e `disconnectedCallback` per eseguire un hangup pulito e terminare lo stream alla messa in background dell'app.
+- **Video Live Fluido a 15 FPS**:
+  - Incrementata la fluidità dello streaming video live da circa 3 FPS a 15 FPS stabili.
+  - Ottimizzati i parametri FFmpeg (`fps=15`, `-fflags nobuffer -flags low_delay`).
+  - Ottimizzato il loop asincrono di rendering dei frame nella card Lovelace a un intervallo di 65 ms.
+- **Sblocco Cancello e Cancelletto a Bassa Latenza da Riposo**:
+  - Ridotta drasticamente la latenza di sblocco a riposo (cold unlock) sui sistemi a 2 fili attendendo unicamente il `200 OK` del SIP (`wait_for_sip_connected`) e una breve stabilizzazione del bus di 0.35s, invece di attendere la decodifica del flusso video completo.
+
+## v1.2.5 — 2026-10-25
+
+### 🇬🇧 English
+
+- **2-Wire Bus Relay Unlock via `commandDevice` (`functionId="23"` / `"24"`) & Auto-Wake Handshake**:
+  - Fixed failure to actuate Pedestrian Gate (Lock 1) and Driveway Gate (Lock 2) on 2-wire `TS-SMART` indoor monitors (`VI2F-PIT7WF`, `TS-SMART7xx`, `TS-SMART10xx`, `protocol="0"`).
+  - Implemented the proprietary cloud command endpoint `POST /smarthome/api/device/command/control` extracted from Android bytecode (`LinphoneTalkBack.unlock`):
+    - Pedestrian gate unlock: `functionId="23"` with JSON payload `value='{"outDoorNumber":"1","lockStatus":1}'`.
+    - Driveway sliding gate unlock: `functionId="24"` with JSON payload `value='{"outDoorNumber":"1","lockStatus":1}'`.
+  - Added temporary SIP/SRTP auto-wake handshake: when an unlock command is initiated in idle state (`call_state === "idle"`), the integration briefly wakes the unpowered 2-wire outdoor station to energize its internal relay coil on the bus before pulsing the unlock command.
+- **In-Call Dual Unlock Controls (`ave-video44-card.js`)**:
+  - Added the **Apri Cancello** (Driveway Gate) button during active video monitoring and call states, providing direct dual-lock control alongside **Apri Cancelletto** (Pedestrian Gate).
+
+### 🇮🇹 Italiano
+
+- **Sblocco Relè Bus 2 Fili via `commandDevice` (`functionId="23"` / `"24"`) e Handshake di Auto-Risveglio**:
+  - Risolto il mancato azionamento di Cancelletto (Serratura 1) e Cancello Carraio (Serratura 2) sui monitor `TS-SMART` a 2 fili (`VI2F-PIT7WF`, `TS-SMART7xx`, `TS-SMART10xx`, `protocol="0"`).
+  - Implementato l'endpoint cloud proprietario `POST /smarthome/api/device/command/control` estratto dal bytecode Android (`LinphoneTalkBack.unlock`):
+    - Sblocco cancelletto pedonale: `functionId="23"` con payload JSON `value='{"outDoorNumber":"1","lockStatus":1}'`.
+    - Sblocco cancello carraio: `functionId="24"` con payload JSON `value='{"outDoorNumber":"1","lockStatus":1}'`.
+  - Introdotto l'handshake di auto-risveglio temporaneo via SIP/SRTP: quando il comando apriporta viene impartito a riposo (`idle`), l'integrazione risveglia brevemente il posto esterno per alimentare la bobina del relè sul bus 2 fili prima di trasmettere l'impulso di sblocco.
+- **Controlli Doppia Serratura Durante la Chiamata (`ave-video44-card.js`)**:
+  - Aggiunto nella card Lovelace il pulsante **Apri Cancello** (carraio) anche durante il monitoraggio video e la conversazione attiva, accanto ad **Apri Cancelletto** (pedonale).
+
 ## v1.2.4 — 2026-10-25
 
 ### 🇬🇧 English

@@ -167,6 +167,34 @@
 - Invariant: Mobile WebViews (especially Android system WebView in the Home Assistant Companion App) and connections traversing VPN tunnels (WireGuard, Tailscale) frequently mishandle `multipart/x-mixed-replace` on standard HTML `<img>` tags. The browser engine does not reliably trigger `onload` events for streaming multipart boundaries when hidden or when frame timing fluctuates, leaving video viewports completely black.
 - Fix: Driving camera frames via an explicit asynchronous loop (`fetch` -> `response.blob()` -> `URL.createObjectURL(blob)`) provides rock-solid frame delivery across all mobile WebViews and network topologies, with `URL.revokeObjectURL(oldUrl)` preventing memory leaks.
 
+---
+
+## 2026-10-25 — v1.2.5 2-Wire Bus Hardware Lock Control & Auto-Wake Handshake
+
+### 25. 2-Wire Bus Relay Unlock via commandDevice & Standby Auto-Wake
+- Command Architecture: On 2-wire bus systems (`protocol="0"`), outdoor doorstation relays are not addressed directly by IP or LAN UDP. Unlocking must be commanded via the cloud endpoint `POST /smarthome/api/device/command/control` using `functionId="23"` for Lock 1 (pedestrian) and `functionId="24"` for Lock 2 (driveway), with payload `value='{"outDoorNumber":"1","lockStatus":1}'` (reverse-engineered from `LinphoneTalkBack.unlock`).
+- Standby Power Invariant: The 2-wire outdoor doorstation relay coils are physically unpowered when idle. Triggering `commandDevice` while `call_state === "idle"` results in failure or timeouts because the relay driver lacks bus operating voltage.
+- Auto-Wake Handshake: An unlock request during standby must execute a brief temporary SIP/SRTP auto-wake handshake to energize the 2-wire bus before issuing the relay trigger payload, ensuring dependable latch actuation at all times.
+
+---
+
+## 2026-10-25 — v1.2.6 SIP Session Liveness, 2-Wire Bus Cooldown & Mobile App Lifecycle
+
+### 26. 2-Wire Bus Physical Discharge Cooldown & SIP 603 Decline Prevention
+- Invariant: In 2-wire video intercom systems (`protocol="0"`), the physical bus transceiver, power decoupling capacitors, and doorstation DSP require an electrical discharge and settling period when a session ends.
+- Immediate Dial Hazard: Attempting to initiate a new SIP `INVITE` immediately following session teardown causes the cloud proxy (OpenSIPS) to reject the invitation with `603 Decline` or result in gateway `TimeoutError`.
+- Cooldown Mandate: The integration must enforce a mandatory 3.0-second cooldown interval following SIP termination before permitting subsequent calls or monitoring sessions, serializing rapid retries and ensuring the physical bus is stable.
+
+### 27. RTP Packet Liveness Tracking, Remote BYE Handling & Companion App Abort
+- Trap: Client crashes, network drops, or closing the mobile Companion App often leave SIP dialogs open on the cloud registrar. If the client simply stops reading frames without an explicit teardown, the session remains locked indefinitely.
+- Multi-Layered Liveness Invariant:
+  1. Record timestamps for every received SRTP packet (`last_rtp_ts`) to detect dead media channels.
+  2. Maintain a continuous background listener for remote SIP `BYE` requests from OpenSIPS or the doorstation.
+  3. Automatically terminate orphaned sessions after 20 seconds of consumer read inactivity.
+- Frontend AbortController: When navigating away from or backgrounding the card in the Android Companion App, all in-flight HTTP requests must be aborted via `AbortController` and disconnected gracefully in `visibilitychange` / `disconnectedCallback` to prevent Lovelace "Configuration error" warnings upon app resume.
+
+
+
 
 
 

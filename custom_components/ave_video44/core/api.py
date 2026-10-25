@@ -1,6 +1,7 @@
 """AVE Video V44 Cloud REST API client."""
 
 import asyncio
+import json
 import re
 import time
 from typing import Any, Dict, List, Optional
@@ -306,6 +307,35 @@ class AveCloudApi:
             async with session.post(url, params=params, data=data, headers=self._headers(form=True)) as resp:
                 self._capture_cookies(resp)
                 return await resp.json()
+
+    async def command_unlock(
+        self,
+        device_id: str | int,
+        lock_id: str | int = "1",
+        monitoring_device_number: str = "1",
+        home_id: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Send device command control unlock (functionId 23 for lock 1, 24 for lock 2)."""
+        session = await self._get_session()
+        params = self._signed_query()
+        function_id = "24" if str(lock_id) == "2" else "23"
+        val = json.dumps(
+            {"outDoorNumber": str(monitoring_device_number), "lockStatus": 1},
+            separators=(",", ":"),
+        )
+        data = {
+            "id": str(device_id),
+            "functionId": function_id,
+            "value": val,
+            "time": str(int(time.time() * 1000)),
+        }
+        url = f"{self._base_url}/smarthome/api/device/command/control"
+        headers = self._headers(home_id=home_id, form=True)
+        async with asyncio.timeout(10.0):
+            async with session.post(url, params=params, data=data, headers=headers) as resp:
+                self._capture_cookies(resp)
+                return await resp.json()
+
 
     async def get_sip_account(self, device_id: Optional[str] = None) -> Dict[str, Any]:
         """Fetch dynamic SIP extension credentials for the device."""

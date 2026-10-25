@@ -715,3 +715,116 @@ async def test_cloud_sip_media_session_read_concatenated_sip_messages():
     assert body_2 == sdp_body
 
 
+@pytest.mark.asyncio
+async def test_cloud_sip_last_rtp_ts_and_wait_connected():
+    """Verify CloudSipMediaSession tracks last_rtp_ts and wait_for_sip_connected behaves properly."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+    import time
+
+    session = CloudSipMediaSession(
+        device_id="12345",
+        sip_username="sip:test@example.com",
+        sip_password="pass",
+        target_sip_uri="sip:target@example.com",
+    )
+    assert session.last_rtp_ts == 0.0
+
+    # Test wait_for_sip_connected timeout
+    connected = await session.wait_for_sip_connected(timeout=0.05)
+    assert connected is False
+
+    # Test wait_for_sip_connected success when event is set
+    session._sip_connected_event.set()
+    connected = await session.wait_for_sip_connected(timeout=0.05)
+    assert connected is True
+
+    # Test last_rtp_ts update
+    t = time.monotonic()
+    session._last_rtp_ts = t
+    assert session.last_rtp_ts == t
+
+
+@pytest.mark.asyncio
+async def test_coordinator_notify_frame_read_and_get_active_sip_session(mock_coordinator):
+    """Verify notify_frame_read updates timestamp and get_active_sip_session detects stale sessions."""
+    import time
+    dev_id = "test_dev_1"
+
+    # notify_frame_read
+    assert dev_id not in mock_coordinator._last_frame_request_ts
+    mock_coordinator.notify_frame_read(dev_id)
+    assert dev_id in mock_coordinator._last_frame_request_ts
+    assert mock_coordinator._last_frame_request_ts[dev_id] > 0
+
+    # get_active_sip_session with fresh session
+    mock_sess = MagicMock()
+    mock_sess.is_active = True
+    mock_sess.last_rtp_ts = time.monotonic() - 2.0
+    mock_coordinator.cloud_sip_sessions[dev_id] = mock_sess
+
+    active = mock_coordinator.get_active_sip_session(dev_id)
+    assert active is mock_sess
+
+    # get_active_sip_session with stale session (>10s)
+    mock_sess.last_rtp_ts = time.monotonic() - 11.0
+    mock_coordinator.async_hangup_call = AsyncMock()
+    stale_active = mock_coordinator.get_active_sip_session(dev_id)
+    assert stale_active is None
+    assert mock_sess.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_coordinator_unlock_faster_cold_unlock(mock_coordinator):
+    """Verify async_unlock waits for SIP connect and waits at least 1.5s pulse before hangup."""
+    dev_id = "test_dev_unlock"
+    mock_coordinator.call_state = "idle"
+    mock_coordinator.cloud_sip_sessions.clear()
+
+    mock_sess = MagicMock()
+    mock_sess.is_active = True
+    mock_sess.wait_for_sip_connected = AsyncMock(return_value=True)
+
+    async def _mock_wake(*args, **kwargs):
+        mock_coordinator.cloud_sip_sessions[dev_id] = mock_sess
+        return "sip:target"
+
+    mock_coordinator.async_wake_camera = AsyncMock(side_effect=_mock_wake)
+    mock_coordinator.async_hangup_call = AsyncMock()
+    mock_coordinator.api.command_unlock = AsyncMock(return_value={"code": "0"})
+    mock_coordinator.api.unlock = AsyncMock(return_value={"code": "0"})
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await mock_coordinator.async_unlock(device_id=dev_id, lock_id="1")
+
+        mock_coordinator.async_wake_camera.assert_called_once_with(dev_id, monitoring_device_number="1")
+        mock_sess.wait_for_sip_connected.assert_called_once_with(timeout=8.0)
+        mock_coordinator.api.command_unlock.assert_called_once_with(
+            device_id=dev_id,
+            lock_id="1",
+            monitoring_device_number="1",
+            home_id=mock_coordinator.home_id,
+        )
+        mock_coordinator.api.unlock.assert_called_once_with(
+            device_id=dev_id,
+            lock_id="1",
+        )
+        mock_coordinator.async_hangup_call.assert_called_once_with(dev_id)
+
+
+@pytest.mark.asyncio
+async def test_camera_notify_frame_read_called(mock_coordinator):
+    """Verify camera async_camera_image and handle_async_mjpeg_stream call coordinator notify_frame_read."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+    dev_id = "test_cam_dev"
+    mock_coordinator.notify_frame_read = MagicMock()
+    mock_coordinator.async_wait_for_wake = AsyncMock()
+    mock_coordinator.async_get_camera_frame = AsyncMock(return_value=b"jpeg_bytes")
+
+    cam = AveVideo44Camera(mock_coordinator, dev_id)
+    img = await cam.async_camera_image()
+    assert img == b"jpeg_bytes"
+    mock_coordinator.notify_frame_read.assert_called_with(dev_id)
+
+
+
+

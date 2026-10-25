@@ -93,11 +93,11 @@ def test_icons_json_and_translation_keys():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
 
-    assert manifest["version"] == "1.2.4"
-    assert pyproject["project"]["version"] == "1.2.4"
+    assert manifest["version"] == "1.2.6"
+    assert pyproject["project"]["version"] == "1.2.6"
     match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
     assert match is not None
-    assert match.group(1) == "1.2.4"
+    assert match.group(1) == "1.2.6"
 
 
 def test_card_editor_and_zero_yaml_support():
@@ -116,7 +116,7 @@ def test_card_editor_and_zero_yaml_support():
 def test_card_bubble_styling_retry_and_title():
     """Verify Bubble Card pill styling, retry timer, hidden live video, and title support."""
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
-    assert 'CARD_VERSION = "1.2.4"' in card_js or "CARD_VERSION = '1.2.4'" in card_js
+    assert 'CARD_VERSION = "1.2.6"' in card_js or "CARD_VERSION = '1.2.6'" in card_js
     assert "border-radius: 28px" in card_js
     assert ".btn-icon-bubble" in card_js
     assert "max-width: 780px" in card_js
@@ -136,7 +136,7 @@ def test_card_bubble_styling_retry_and_title():
 def test_init_add_extra_js_url():
     init_py = (ROOT / "custom_components" / "ave_video44" / "__init__.py").read_text(encoding="utf-8")
     assert "add_extra_js_url" in init_py
-    assert "/ave_video44_card/ave-video44-card.js?v=1.2.4" in init_py
+    assert "/ave_video44_card/ave-video44-card.js?v=1.2.6" in init_py
 
 
 
@@ -224,7 +224,7 @@ async def test_async_register_card_registers_lovelace_resource():
 
     items = hass.data["lovelace"].resources.async_items()
     assert len(items) == 1
-    assert items[0]["url"] == "/ave_video44_card/ave-video44-card.js?v=1.2.4"
+    assert items[0]["url"] == "/ave_video44_card/ave-video44-card.js?v=1.2.6"
     assert items[0]["res_type"] == "module"
     assert hass.data[DOMAIN]["card_registered"] is True
 

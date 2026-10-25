@@ -70,6 +70,9 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
+        if hasattr(self.coordinator, "notify_frame_read"):
+            self.coordinator.notify_frame_read(self.device_id)
+
         if hasattr(self.coordinator, "async_wait_for_wake"):
             await self.coordinator.async_wait_for_wake(self.device_id, timeout=10.0)
 
@@ -94,6 +97,9 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
         self, request: Any
     ) -> Any:
         """Serve live MJPEG stream from Cloud SIP session or RTSP via FFmpeg."""
+        if hasattr(self.coordinator, "notify_frame_read"):
+            self.coordinator.notify_frame_read(self.device_id)
+
         if hasattr(self.coordinator, "async_wait_for_wake"):
             await self.coordinator.async_wait_for_wake(self.device_id, timeout=10.0)
 
@@ -123,6 +129,8 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
 
                     last_seq = session.frame_seq
                     while session.is_active:
+                        if hasattr(self.coordinator, "notify_frame_read"):
+                            self.coordinator.notify_frame_read(self.device_id)
                         last_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.5)
                         cur_frame = new_frame or session.latest_frame
                         if cur_frame:

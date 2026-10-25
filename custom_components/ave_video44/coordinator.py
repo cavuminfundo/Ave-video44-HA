@@ -2,8 +2,10 @@
 
 import asyncio
 from datetime import datetime, timezone
+import inspect
 import json
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -15,7 +17,9 @@ from .const import (
     CONF_ACCOUNT,
     CONF_INTERCOM_BOOK,
     CONF_PASSWORD,
+    CONF_UNLOCK_PULSE_DURATION,
     DEFAULT_PREFERRED_VIDEO_STREAM,
+    DEFAULT_UNLOCK_PULSE_DURATION,
     DOMAIN,
 )
 from .core.api import AveCloudApi
@@ -57,6 +61,8 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self._wake_events: Dict[str, asyncio.Event] = {}
         self._wake_lock = asyncio.Lock()
         self.mqtt_listener: Optional[AveMqttListener] = None
+        self._last_frame_request_ts: Dict[str, float] = {}
+        self._watchdog_tasks: Dict[str, asyncio.Task] = {}
 
         self.devices: List[Dict[str, Any]] = []
         self.call_state: str = "idle"
@@ -216,14 +222,20 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             started_sip = False
             if target_sip_uri and self.api:
                 async with self._wake_lock:
-                    if dev_str in self.cloud_sip_sessions and self.cloud_sip_sessions[dev_str].is_active:
-                        self.active_rtsp_url = None
-                        self.active_device_id = dev_str
-                        self.call_state = "monitoring"
-                        self.async_update_listeners()
-                        return target_sip_uri
-
                     if dev_str in self.cloud_sip_sessions:
+                        existing = self.cloud_sip_sessions[dev_str]
+                        now = time.monotonic()
+                        last_rtp = getattr(existing, "last_rtp_ts", 0.0)
+                        last_rtp_val = float(last_rtp) if isinstance(last_rtp, (int, float)) else 0.0
+                        is_stale = existing.is_active and last_rtp_val > 0 and (now - last_rtp_val) >= 8.0
+                        if existing.is_active and not is_stale:
+                            self.notify_frame_read(dev_str)
+                            self.active_rtsp_url = None
+                            self.active_device_id = dev_str
+                            self.call_state = "monitoring"
+                            self.async_update_listeners()
+                            return target_sip_uri
+
                         old_sess = self.cloud_sip_sessions.pop(dev_str)
                         try:
                             await old_sess.async_stop()
@@ -261,6 +273,14 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                             started_sip = await session.async_start()
                             if not started_sip:
                                 self.cloud_sip_sessions.pop(dev_str, None)
+                            else:
+                                self.notify_frame_read(dev_str)
+                                old_task = self._watchdog_tasks.pop(dev_str, None)
+                                if old_task and not old_task.done():
+                                    old_task.cancel()
+                                self._watchdog_tasks[dev_str] = asyncio.create_task(
+                                    self._session_watchdog(dev_str, session)
+                                )
                     except Exception as sip_err:
                         self.cloud_sip_sessions.pop(dev_str, None)
                         _LOGGER.debug("Could not start CloudSipMediaSession: %s", sip_err)
@@ -342,12 +362,69 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         finally:
             wake_ev.set()
 
+    def notify_frame_read(self, device_id: int | str) -> None:
+        """Record timestamp of camera frame read to prevent idle hangup."""
+        self._last_frame_request_ts[str(device_id)] = time.monotonic()
+
+    def get_active_sip_session(self, device_id: int | str) -> Optional[CloudSipMediaSession]:
+        """Return active Cloud SIP session for device, terminating if stale (>10s without RTP)."""
+        dev_str = str(device_id)
+        sess = self.cloud_sip_sessions.get(dev_str)
+        if not sess or not sess.is_active:
+            return None
+        now = time.monotonic()
+        last_rtp = getattr(sess, "last_rtp_ts", 0.0)
+        last_rtp_val = float(last_rtp) if isinstance(last_rtp, (int, float)) else 0.0
+        if last_rtp_val > 0 and (now - last_rtp_val) > 10.0:
+            _LOGGER.warning(
+                "SIP session for device %s is stale (>10.0s without RTP: %.1fs), terminating",
+                dev_str,
+                now - last_rtp_val,
+            )
+            sess.is_active = False
+            asyncio.create_task(self.async_hangup_call(dev_str))
+            return None
+        return sess
+
+    async def _session_watchdog(self, device_id: str, session: CloudSipMediaSession) -> None:
+        """Monitor active SIP session for frame reader activity and max session duration."""
+        start_ts = time.monotonic()
+        try:
+            while session.is_active and self.cloud_sip_sessions.get(device_id) is session:
+                await asyncio.sleep(2.0)
+                now = time.monotonic()
+                # Check frame read inactivity (>20.0s)
+                last_read = self._last_frame_request_ts.get(device_id, start_ts)
+                last_read_val = float(last_read) if isinstance(last_read, (int, float)) else start_ts
+                if (now - last_read_val) > 20.0:
+                    _LOGGER.info(
+                        "Watchdog: no frame requests for >20.0s (%.1fs) on device %s, hanging up",
+                        now - last_read,
+                        device_id,
+                    )
+                    await self.async_hangup_call(device_id)
+                    break
+                # Check max session duration (>90.0s)
+                if (now - start_ts) > 90.0:
+                    _LOGGER.info(
+                        "Watchdog: max session duration reached (%.1fs) on device %s, hanging up",
+                        now - start_ts,
+                        device_id,
+                    )
+                    await self.async_hangup_call(device_id)
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as err:
+            _LOGGER.debug("Watchdog error on device %s: %s", device_id, err)
+
     async def async_get_camera_frame(
         self, device_id: int | str, timeout: float = 6.0
     ) -> Optional[bytes]:
         """Get latest camera frame from active CloudSipMediaSession."""
-        session = self.cloud_sip_sessions.get(str(device_id))
+        session = self.get_active_sip_session(device_id)
         if session and session.is_active:
+            self.notify_frame_read(device_id)
             return await session.wait_for_first_frame(timeout=timeout)
         return None
 
@@ -355,6 +432,11 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         """Terminate active call or monitoring session."""
         _LOGGER.debug("Hanging up call/monitoring on device %s", device_id)
         dev_str = str(device_id)
+        watchdog = self._watchdog_tasks.pop(dev_str, None)
+        if watchdog and not watchdog.done():
+            watchdog.cancel()
+        self._last_frame_request_ts.pop(dev_str, None)
+
         if dev_str in self.cloud_sip_sessions:
             sess = self.cloud_sip_sessions.pop(dev_str)
             try:
@@ -444,9 +526,72 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         return discovered
 
     async def async_unlock(self, device_id: int | str, lock_id: int | str = "1") -> None:
-        """Unlock specified lock on device."""
-        if self.api:
-            await self.api.unlock(device_id=str(device_id), lock_id=str(lock_id))
+        """Unlock specified lock on device (with automatic wake on 2-wire bus if idle)."""
+        dev_str = str(device_id)
+        was_idle = (
+            (self.call_state == "idle")
+            or (dev_str not in self.cloud_sip_sessions)
+            or (not self.cloud_sip_sessions[dev_str].is_active)
+        )
+
+        if was_idle:
+            _LOGGER.info("Waking camera for cold unlock on device %s (lock %s)", device_id, lock_id)
+            await self.async_wake_camera(device_id, monitoring_device_number="1")
+            sess = self.cloud_sip_sessions.get(dev_str)
+            if sess and hasattr(sess, "wait_for_sip_connected"):
+                wait_fn = getattr(sess, "wait_for_sip_connected")
+                connected = False
+                if callable(wait_fn):
+                    try:
+                        res = wait_fn(timeout=8.0)
+                        if inspect.isawaitable(res):
+                            connected = await res
+                        else:
+                            connected = bool(res)
+                    except Exception:
+                        connected = False
+                if connected:
+                    _LOGGER.debug("SIP connected for unlock on device %s, waiting 0.35s before command", dev_str)
+                    await asyncio.sleep(0.35)
+                else:
+                    _LOGGER.warning("SIP connection wait timed out for unlock on device %s", dev_str)
+                    await asyncio.sleep(0.5)
+            else:
+                await asyncio.sleep(1.0)
+
+        sess = self.cloud_sip_sessions.get(dev_str)
+        can_unlock = (sess is None or sess.is_active or not was_idle)
+        if self.api and can_unlock:
+            home_id = getattr(self, "home_id", None)
+            try:
+                cmd_res = await self.api.command_unlock(
+                    device_id=dev_str,
+                    lock_id=lock_id,
+                    monitoring_device_number="1",
+                    home_id=home_id,
+                )
+                _LOGGER.debug("Command unlock response: %s", cmd_res)
+            except Exception as err:
+                _LOGGER.warning("Error in command_unlock: %s", err)
+
+            try:
+                unlock_res = await self.api.unlock(
+                    device_id=dev_str,
+                    lock_id=str(lock_id),
+                )
+                _LOGGER.debug("Monitoring unlock response: %s", unlock_res)
+            except Exception as err:
+                _LOGGER.warning("Error in api.unlock: %s", err)
+
+        if was_idle:
+            pulse_duration = float(
+                self.entry.options.get(CONF_UNLOCK_PULSE_DURATION, DEFAULT_UNLOCK_PULSE_DURATION)
+                if hasattr(self, "entry") and hasattr(self.entry, "options")
+                else DEFAULT_UNLOCK_PULSE_DURATION
+            )
+            await asyncio.sleep(max(1.5, pulse_duration))
+            await self.async_hangup_call(device_id)
+
 
     def get_rtsp_url(self, device_id: int | str) -> Optional[str]:
         """Return RTSP streaming URL for requested monitor."""
@@ -639,6 +784,12 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Disconnect MQTT client and close SIP transport."""
+        for task in list(self._watchdog_tasks.values()):
+            if not task.done():
+                task.cancel()
+        self._watchdog_tasks.clear()
+        self._last_frame_request_ts.clear()
+
         for sess in list(self.cloud_sip_sessions.values()):
             try:
                 await sess.async_stop()

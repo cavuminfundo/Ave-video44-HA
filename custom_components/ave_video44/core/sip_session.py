@@ -274,6 +274,8 @@ class AveSipSession(asyncio.DatagramProtocol):
 class CloudSipMediaSession:
     """SIP media session for AVE Cloud (TS-SMART 2-wire) H.264 SRTP video decoding."""
 
+    _last_session_stop_ts: float = 0.0
+
     def __init__(
         self,
         device_id: str,
@@ -310,6 +312,8 @@ class CloudSipMediaSession:
         self.frame_seq: int = 0
         self._first_frame_event = asyncio.Event()
         self._frame_event = asyncio.Event()
+        self._sip_connected_event = asyncio.Event()
+        self._last_rtp_ts: float = 0.0
         self.is_active: bool = False
 
         self._mjpeg_buf = bytearray()
@@ -323,6 +327,7 @@ class CloudSipMediaSession:
         self._ffmpeg_port: Optional[int] = None
         self._ffmpeg_proc: Optional[asyncio.subprocess.Process] = None
         self._tasks: List[asyncio.Task] = []
+        self._sip_rx_task: Optional[asyncio.Task] = None
         self._local_ip: str = "127.0.0.1"
         self._call_id: Optional[str] = None
         self._from_tag: Optional[str] = None
@@ -330,6 +335,20 @@ class CloudSipMediaSession:
         self._reg_tag: Optional[str] = None
         self._contact_uri: Optional[str] = None
         self._route_headers: List[str] = []
+
+    @property
+    def last_rtp_ts(self) -> float:
+        """Timestamp of the most recent RTP packet received."""
+        return self._last_rtp_ts
+
+    async def wait_for_sip_connected(self, timeout: float = 8.0) -> bool:
+        """Wait until SIP handshake is established (200 OK + ACK)."""
+        try:
+            await asyncio.wait_for(self._sip_connected_event.wait(), timeout=timeout)
+            return True
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return False
+
 
     @staticmethod
     def _parse_digest_challenge(challenge: str) -> Dict[str, str]:
@@ -635,41 +654,88 @@ class CloudSipMediaSession:
                 except Exception:
                     pass
 
+            if self._last_rtp_ts > 0 and (now - self._last_rtp_ts) > 10.0:
+                _LOGGER.debug("No RTP packets received for >10.0s, marking session inactive")
+                self.is_active = False
+                break
+
             try:
                 while self._video_sock:
                     pkt, _ = self._video_sock.recvfrom(65535)
-                    if pkt and self._ffmpeg_port:
-                        self._video_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_port))
+                    if pkt:
+                        self._last_rtp_ts = time.monotonic()
+                        if self._ffmpeg_port:
+                            self._video_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_port))
             except (BlockingIOError, InterruptedError):
                 pass
             except Exception:
                 pass
             await asyncio.sleep(0.005)
 
-    async def _sip_watch_loop(self) -> None:
-        """Watch SIP TCP socket for remote BYE or termination."""
+    async def _sip_rx_loop(self) -> None:
+        """Read incoming SIP messages from TCP stream, handle remote BYE, detect connection loss."""
         start_time = time.monotonic()
         try:
             while self.is_active and self._reader:
                 if time.monotonic() - start_time > 90.0:
                     break
                 try:
-                    line = await asyncio.wait_for(self._reader.readline(), timeout=2.0)
-                    if not line:
-                        break
-                    if line.startswith(b"BYE "):
-                        _LOGGER.debug("Received remote BYE, terminating session")
+                    start_line, headers, body = await asyncio.wait_for(
+                        self._read_sip_msg(), timeout=2.0
+                    )
+                    if start_line.startswith("BYE "):
+                        _LOGGER.debug("Received remote SIP BYE: %s, sending 200 OK", start_line)
+                        if self._writer:
+                            cseq_val = headers.get("cseq", "1 BYE")
+                            call_id_val = headers.get("call-id", self._call_id or "")
+                            from_h = headers.get("from", "")
+                            to_h = headers.get("to", "")
+                            resp = [
+                                "SIP/2.0 200 OK",
+                                f"Via: {headers.get('via', '')}",
+                                f"From: {from_h}",
+                                f"To: {to_h}",
+                                f"Call-ID: {call_id_val}",
+                                f"CSeq: {cseq_val}",
+                                "Content-Length: 0",
+                                "",
+                                "",
+                            ]
+                            try:
+                                self._writer.write("\r\n".join(resp).encode("utf-8"))
+                                await self._writer.drain()
+                            except Exception:
+                                pass
+                        self.is_active = False
                         break
                 except asyncio.TimeoutError:
                     continue
-        except (asyncio.CancelledError, Exception):
-            pass
+                except (ConnectionResetError, EOFError):
+                    _LOGGER.debug("SIP TCP connection closed in rx loop")
+                    self.is_active = False
+                    break
+                if self._reader and self._reader.at_eof():
+                    _LOGGER.debug("SIP reader reached EOF")
+                    self.is_active = False
+                    break
+        except (asyncio.CancelledError, Exception) as err:
+            _LOGGER.debug("SIP rx loop exited: %s", err)
         finally:
             if self.is_active:
+                self.is_active = False
                 asyncio.create_task(self.async_stop())
+
+    _sip_watch_loop = _sip_rx_loop
 
     async def async_start(self) -> bool:
         """Start SIP session over TCP, send REGISTER, INVITE, spin FFmpeg and UDP relay."""
+        # 1. OpenSIPS & 2-Wire Bus Cooldown
+        elapsed = time.monotonic() - CloudSipMediaSession._last_session_stop_ts
+        if 0 < elapsed < 3.0:
+            cooldown_wait = 3.0 - elapsed
+            _LOGGER.debug("Waiting %0.2fs for TS-SMART / OpenSIPS cooldown...", cooldown_wait)
+            await asyncio.sleep(cooldown_wait)
+
         try:
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -702,17 +768,36 @@ class CloudSipMediaSession:
             self._ffmpeg_port = s_ff.getsockname()[1]
             s_ff.close()
 
-            self._reader, self._writer = await asyncio.wait_for(
-                asyncio.open_connection(self._sip_domain, 5060), timeout=8.0
-            )
+            # Connect and REGISTER with retry once on timeout
+            status_code = 0
+            for reg_attempt in range(2):
+                try:
+                    self._reader, self._writer = await asyncio.wait_for(
+                        asyncio.open_connection(self._sip_domain, 5060), timeout=8.0
+                    )
+                    # REGISTER
+                    reg_pkt = self.build_register_packet(cseq=1)
+                    self._writer.write(reg_pkt.encode("utf-8"))
+                    await self._writer.drain()
 
-            # REGISTER
-            reg_pkt = self.build_register_packet(cseq=1)
-            self._writer.write(reg_pkt.encode("utf-8"))
-            await self._writer.drain()
-
-            start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=6.0)
-            status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                    start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=6.0)
+                    status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                    break
+                except asyncio.TimeoutError:
+                    if reg_attempt == 0:
+                        _LOGGER.warning("Timeout waiting for initial REGISTER response, retrying in 1.5s...")
+                        if self._writer:
+                            try:
+                                self._writer.close()
+                                await self._writer.wait_closed()
+                            except Exception:
+                                pass
+                            self._writer = None
+                        self._reader = None
+                        self._rx_buf.clear()
+                        await asyncio.sleep(1.5)
+                    else:
+                        raise
 
             if status_code in (401, 407):
                 auth_hdr_name = "proxy-authenticate" if status_code == 407 else "www-authenticate"
@@ -757,6 +842,7 @@ class CloudSipMediaSession:
             start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=8.0)
             status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
 
+            auth_val = None
             if status_code in (401, 407):
                 ack_pkt = (
                     f"ACK {self.target_sip_uri} SIP/2.0\r\n"
@@ -797,17 +883,58 @@ class CloudSipMediaSession:
                 start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=8.0)
                 status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
 
-            deadline = time.monotonic() + 12.0
+            deadline = time.monotonic() + 15.0
+            last_invite_send_ts = time.monotonic()
+            retried_603 = False
             while status_code != 200 and time.monotonic() < deadline:
-                if status_code >= 400:
+                if status_code == 603 and not retried_603:
+                    retried_603 = True
+                    _LOGGER.warning("Received 603 Decline from monitor cooldown, retrying INVITE in 2.5s...")
+                    await asyncio.sleep(2.5)
+                    cseq_inv += 1
+                    inv_auth_pkt = self.build_invite_packet(
+                        cseq=cseq_inv,
+                        local_ip=self._local_ip,
+                        audio_port=audio_port,
+                        video_port=video_port,
+                        srtp_audio_key=srtp_audio_key,
+                        srtp_video_key=srtp_video_key,
+                        auth_header=auth_val,
+                    )
+                    self._writer.write(inv_auth_pkt.encode("utf-8"))
+                    await self._writer.drain()
+                    last_invite_send_ts = time.monotonic()
+                    status_code = 0
+                    continue
+                elif status_code >= 400:
                     _LOGGER.warning("SIP INVITE rejected: %s", start_line)
                     await self.async_stop()
                     return False
-                rem_timeout = max(0.5, deadline - time.monotonic())
-                start_line, headers, body = await asyncio.wait_for(
-                    self._read_sip_msg(), timeout=rem_timeout
-                )
-                status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+
+                # Re-send authenticated INVITE if 4.5s passed without 200 OK
+                if auth_val and (time.monotonic() - last_invite_send_ts) >= 4.5:
+                    cseq_inv += 1
+                    inv_auth_pkt = self.build_invite_packet(
+                        cseq=cseq_inv,
+                        local_ip=self._local_ip,
+                        audio_port=audio_port,
+                        video_port=video_port,
+                        srtp_audio_key=srtp_audio_key,
+                        srtp_video_key=srtp_video_key,
+                        auth_header=auth_val,
+                    )
+                    self._writer.write(inv_auth_pkt.encode("utf-8"))
+                    await self._writer.drain()
+                    last_invite_send_ts = time.monotonic()
+
+                rem_timeout = min(4.5, max(0.5, deadline - time.monotonic()))
+                try:
+                    start_line, headers, body = await asyncio.wait_for(
+                        self._read_sip_msg(), timeout=rem_timeout
+                    )
+                    status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                except asyncio.TimeoutError:
+                    pass
 
             if status_code != 200:
                 _LOGGER.warning("SIP INVITE did not receive 200 OK: %s", start_line)
@@ -841,6 +968,9 @@ class CloudSipMediaSession:
             self._writer.write("\r\n".join(ack_200).encode("utf-8"))
             await self._writer.drain()
 
+            self._last_rtp_ts = time.monotonic()
+            self._sip_connected_event.set()
+
             parsed_sdp = self.parse_200_ok_sdp(body)
             remote_ip = parsed_sdp["remote_ip"] or self._sip_domain
             remote_video_port = parsed_sdp["remote_video_port"]
@@ -871,9 +1001,10 @@ class CloudSipMediaSession:
                 "-flags", "low_delay",
                 "-protocol_whitelist", "file,udp,rtp,srtp,crypto",
                 "-i", self._sdp_path,
+                "-vf", "fps=15,scale=640:-1",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "5",
+                "-q:v", "6",
                 "-",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -888,7 +1019,8 @@ class CloudSipMediaSession:
                     self._udp_relay_loop(remote_ip, remote_video_port, remote_audio_port)
                 )
             )
-            self._tasks.append(asyncio.create_task(self._sip_watch_loop()))
+            self._sip_rx_task = asyncio.create_task(self._sip_rx_loop())
+            self._tasks.append(self._sip_rx_task)
 
             await self.wait_for_first_frame(timeout=2.5)
             return True
@@ -899,7 +1031,8 @@ class CloudSipMediaSession:
 
     async def async_stop(self) -> None:
         """Terminate SIP session, stop FFmpeg and relay tasks, remove temp SDP."""
-        if not self.is_active and not self._writer and not self._ffmpeg_proc:
+        had_opened = bool(self.is_active or self._writer or self._ffmpeg_proc)
+        if not had_opened:
             return
         self.is_active = False
 
@@ -919,6 +1052,10 @@ class CloudSipMediaSession:
                 await self._writer.drain()
             except Exception:
                 pass
+
+        if self._sip_rx_task:
+            self._sip_rx_task.cancel()
+            self._sip_rx_task = None
 
         for t in self._tasks:
             t.cancel()
@@ -969,8 +1106,15 @@ class CloudSipMediaSession:
         self._reg_call_id = None
         self._reg_tag = None
 
+        if had_opened:
+            CloudSipMediaSession._last_session_stop_ts = time.monotonic()
+
         if self.on_terminated:
             try:
                 self.on_terminated()
             except Exception:
                 pass
+
+    stop = async_stop
+    start = async_start
+

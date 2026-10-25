@@ -68,11 +68,10 @@ class AveVideo44Lock(AveVideo44BaseEntity, LockEntity):
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock door/gate and schedule automatic relock."""
         _LOGGER.debug("Unlocking lock %s on device %s", self._lock_id, self.device_id)
-        if self.coordinator.api:
-            await self.coordinator.api.unlock(
-                device_id=self.device_id,
-                lock_id=str(self._lock_id),
-            )
+        await self.coordinator.async_unlock(
+            device_id=self.device_id,
+            lock_id=str(self._lock_id),
+        )
 
         self._attr_is_locked = False
         self.async_write_ha_state()

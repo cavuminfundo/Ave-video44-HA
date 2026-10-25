@@ -325,3 +325,80 @@ async def test_control_monitoring_returns_numeric_call_id():
     call_id_int = await api.control_monitoring(device_id="677771932745207808", monitoring_device_number="1", action=1)
     assert call_id_int == "833971686813601792"
 
+
+@pytest.mark.asyncio
+async def test_command_unlock_payload_and_headers():
+    """Verify api.command_unlock sets correct functionId, value format, and HOME_ID header."""
+    session = MagicMock()
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.cookies = {}
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=None)
+    mock_resp.json = AsyncMock(return_value={"statusCode": 200, "success": True, "message": "request is success"})
+    session.post = MagicMock(return_value=mock_resp)
+
+    api = AveCloudApi(session=session, token="tok", session_id="sess")
+
+    # Lock 1 -> functionId "23"
+    res1 = await api.command_unlock(device_id="dev_001", lock_id="1", monitoring_device_number="1", home_id=26299)
+    assert res1["success"] is True
+    call_args1 = session.post.call_args
+    assert call_args1[0][0].endswith("/smarthome/api/device/command/control")
+    assert call_args1[1]["data"]["functionId"] == "23"
+    assert call_args1[1]["data"]["value"] == '{"outDoorNumber":"1","lockStatus":1}'
+    assert call_args1[1]["headers"]["HOME_ID"] == "26299"
+    assert call_args1[1]["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+
+    # Lock 2 -> functionId "24"
+    res2 = await api.command_unlock(device_id="dev_001", lock_id="2", monitoring_device_number="1", home_id=26299)
+    assert res2["success"] is True
+    call_args2 = session.post.call_args
+    assert call_args2[1]["data"]["functionId"] == "24"
+    assert call_args2[1]["data"]["value"] == '{"outDoorNumber":"1","lockStatus":1}'
+
+
+@pytest.mark.asyncio
+async def test_coordinator_async_unlock_cold_wake_and_active_session():
+    """Verify coordinator.async_unlock wakes camera on 2-wire bus when idle, and preserves active call."""
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.data = {"home_id": 26299}
+    entry.options = {"unlock_pulse_duration": 1}
+
+    from custom_components.ave_video44.coordinator import AveVideo44Coordinator
+    coord = AveVideo44Coordinator(hass, entry)
+    coord.home_id = 26299
+    coord.api.command_unlock = AsyncMock(return_value={"success": True})
+    coord.api.unlock = AsyncMock(return_value={"success": True})
+    coord.async_wake_camera = AsyncMock()
+    coord.async_hangup_call = AsyncMock()
+
+    # Case 1: Cold unlock when idle
+    coord.call_state = "idle"
+    await coord.async_unlock("677771932745207808", lock_id="2")
+    assert coord.async_wake_camera.called
+    assert coord.api.command_unlock.called
+    assert coord.api.unlock.called
+    assert coord.async_hangup_call.called
+
+    # Reset mocks
+    coord.async_wake_camera.reset_mock()
+    coord.api.command_unlock.reset_mock()
+    coord.api.unlock.reset_mock()
+    coord.async_hangup_call.reset_mock()
+
+    # Case 2: In-call/monitoring unlock (active session)
+    coord.call_state = "monitoring"
+    mock_session = MagicMock()
+    mock_session.is_active = True
+    coord.cloud_sip_sessions["677771932745207808"] = mock_session
+
+    await coord.async_unlock("677771932745207808", lock_id="1")
+    assert not coord.async_wake_camera.called
+    assert coord.api.command_unlock.called
+    assert coord.api.unlock.called
+    assert not coord.async_hangup_call.called
+
+

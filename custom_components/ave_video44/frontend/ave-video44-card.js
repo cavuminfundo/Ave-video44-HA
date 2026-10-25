@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.2.4";
+const CARD_VERSION = "1.2.6";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -19,7 +19,9 @@ class AveVideo44Card extends HTMLElement {
     this._lastStateSignature = "";
     this._autoAnswerChecked = false;
     this._boundKeyDown = this._handleKeyDown.bind(this);
+    this._boundVisibilityChange = this._handleVisibilityChange.bind(this);
     this._framePollTimer = null;
+    this._frameAbortController = null;
     this._fetchingFrame = false;
     this._lastBlobUrl = null;
   }
@@ -149,6 +151,7 @@ class AveVideo44Card extends HTMLElement {
 
   connectedCallback() {
     window.addEventListener("keydown", this._boundKeyDown);
+    document.addEventListener("visibilitychange", this._boundVisibilityChange);
     this._checkAutoAnswer();
     this._expandMasonryColumn();
     setTimeout(() => this._expandMasonryColumn(), 150);
@@ -174,7 +177,18 @@ class AveVideo44Card extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener("keydown", this._boundKeyDown);
+    document.removeEventListener("visibilitychange", this._boundVisibilityChange);
     this._cleanupCall();
+  }
+
+  _handleVisibilityChange() {
+    if (document.hidden) {
+      if (this._inCall) {
+        this._hangup();
+      } else {
+        this._stopFramePolling();
+      }
+    }
   }
 
   _handleKeyDown(event) {
@@ -584,7 +598,11 @@ class AveVideo44Card extends HTMLElement {
             </button>
             <button id="btnUnlockInCall" class="btn-surface" aria-label="Apri cancelletto pedonale">
               <span class="btn-icon-bubble"><ha-icon icon="mdi:door-open"></ha-icon></span>
-              <span>Apri Porta</span>
+              <span>Apri Cancelletto</span>
+            </button>
+            <button id="btnUnlockDrivewayInCall" class="btn-surface" aria-label="Apri cancello carraio">
+              <span class="btn-icon-bubble"><ha-icon icon="mdi:gate"></ha-icon></span>
+              <span>Apri Cancello</span>
             </button>
           </div>
 
@@ -625,6 +643,10 @@ class AveVideo44Card extends HTMLElement {
     shadow.getElementById("btnHangup").addEventListener("click", () => this._hangup());
     shadow.getElementById("btnMute").addEventListener("click", () => this._toggleMute());
     shadow.getElementById("btnUnlockInCall").addEventListener("click", () => this._unlock("1"));
+    const btnUnlockDrivewayInCall = shadow.getElementById("btnUnlockDrivewayInCall");
+    if (btnUnlockDrivewayInCall) {
+      btnUnlockDrivewayInCall.addEventListener("click", () => this._unlock("2"));
+    }
     const btnMonitor = shadow.getElementById("btnMonitor");
     if (btnMonitor) {
       btnMonitor.addEventListener("click", () => this._monitor());
@@ -703,6 +725,12 @@ class AveVideo44Card extends HTMLElement {
       clearInterval(this._framePollTimer);
       this._framePollTimer = null;
     }
+    if (this._frameAbortController) {
+      try {
+        this._frameAbortController.abort();
+      } catch (_) {}
+      this._frameAbortController = null;
+    }
     this._fetchingFrame = false;
     if (this._lastBlobUrl) {
       try {
@@ -736,8 +764,24 @@ class AveVideo44Card extends HTMLElement {
       const url = "/api/camera_proxy/" + cameraEntity + "?token=" + token + "&t=" + Date.now();
 
       this._fetchingFrame = true;
+      if (this._frameAbortController) {
+        try {
+          this._frameAbortController.abort();
+        } catch (_) {}
+      }
+      const controller = new AbortController();
+      this._frameAbortController = controller;
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 1500);
+
       try {
-        const resp = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        const resp = await fetch(url, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
         if (resp && resp.ok) {
           const blob = await resp.blob();
           if (blob && blob.size > 1000) {
@@ -765,12 +809,13 @@ class AveVideo44Card extends HTMLElement {
         }
       } catch (_) {
       } finally {
+        clearTimeout(timeoutId);
         this._fetchingFrame = false;
       }
     };
 
     pollFrame();
-    this._framePollTimer = setInterval(pollFrame, 200);
+    this._framePollTimer = setInterval(pollFrame, 65);
   }
 
   _updateView() {

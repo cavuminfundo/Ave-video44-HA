@@ -39,7 +39,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.2.4"
+_CARD_VERSION = "1.2.6"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -49,7 +49,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.2.4"
+    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.2.6"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
 
@@ -75,7 +75,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     # 2) Call add_extra_js_url
     try:
         from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, "/ave_video44_card/ave-video44-card.js?v=1.2.4")
+        add_extra_js_url(hass, resource_url)
     except Exception as err:
         _LOGGER.debug("Could not call add_extra_js_url: %s", err)
 
@@ -303,8 +303,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
         lock_id = call.data.get("lock_id", "1")
         entry_id = call.data.get("entry_id")
         coord = _get_coordinator(entry_id)
-        if coord and coord.api:
-            await coord.api.unlock(device_id=str(device_id), lock_id=str(lock_id))
+        if coord:
+            await coord.async_unlock(device_id=str(device_id), lock_id=str(lock_id))
 
     async def async_service_call_intercom(call: ServiceCall) -> None:
         device_id = call.data.get("device_id")

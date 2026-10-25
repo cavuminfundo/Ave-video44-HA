@@ -450,6 +450,47 @@ Because Home Assistant typically resides behind home router NATs:
 - **Concurrent Wake Lock**: An `asyncio.Lock` serializes calls to `async_wake_camera`, preventing duplicate OpenSIPS connections and race conditions when users tap the wake button repeatedly.
 - **Mobile WebView Blob URL Frame Loop**: In mobile companion apps (Android/iOS) and VPN tunnels, continuous `multipart/x-mixed-replace` streams often fail to fire `onload` events on hidden `<img>` tags. The frontend replaces native multipart parsing with an explicit asynchronous `fetch` -> `Blob` -> `URL.createObjectURL` pipeline targeting `/api/camera_proxy/`, continuously updating image source URLs and revoking old blob handles to eliminate black screen lockups.
 
+---
+
+## 15. 2-Wire Bus Hardware Lock Control & Auto-Wake Handshake (`commandDevice`)
+
+### 15.1 Cloud Command Control Endpoint (`POST /smarthome/api/device/command/control`)
+On 2-wire bus systems (`protocol="0"`), outdoor doorstations do not expose independent IP addresses or local LAN unlock ports. All door opening signals must be routed through the indoor monitor via the cloud command proxy endpoint:
+- **Endpoint**: `POST /smarthome/api/device/command/control`
+- **Request Parameters**:
+  - `deviceId`: Device identifier of the indoor monitor unit.
+  - `functionId`: `"23"` for Lock 1 (pedestrian gate); `"24"` for Lock 2 (driveway sliding gate).
+  - `value`: JSON string formatted as `{"outDoorNumber":"1","lockStatus":1}`.
+- **Origin**: Reverse-engineered directly from Android companion app bytecode (`LinphoneTalkBack.unlock`).
+
+### 15.2 2-Wire Bus Standby Power Invariant & SIP Auto-Wake Handshake
+In 2-wire installations, outdoor station hardware and relay driver circuits are unpowered during `idle` states to conserve energy and respect bus thermal limits.
+- **Relay Actuation Trap**: Transmitting `commandDevice` while the outdoor station is unpowered causes silent actuation failure or gateway timeouts because the outdoor relay board lacks bus DC power to pull in the coil.
+- **Auto-Wake Mitigation**: When an unlock service call occurs while `call_state == "idle"`, the integration executes a lightweight, temporary Cloud SIP/SRTP auto-wake handshake to energize the 2-wire bus before dispatching the `commandDevice` payload, ensuring reliable lock release even when the camera viewport is idle.
+
+---
+
+## 16. SIP Session Liveness, 2-Wire Bus Cooldown & Mobile App Lifecycle
+
+### 16.1 2-Wire Bus Electrical Cooldown Invariant
+When terminating a SIP dialog on 2-wire bus systems (`protocol="0"`), the physical bus transceiver and outdoor power controller require an electrical discharge and stabilization interval. Attempting an immediate subsequent SIP `INVITE` without delay causes OpenSIPS to reject the call with `603 Decline` or trigger a `TimeoutError`.
+- **Enforcement**: `CloudSipMediaSession` enforces a mandatory 3.0-second cooldown timer following session teardown, serializing back-to-back connection attempts and preventing rapid-fire bus contention.
+
+### 16.2 RTP Liveness Tracking, Remote BYE Handling & Orphan Reclaim
+- **RTP Liveness (`last_rtp_ts`)**: The media session records the timestamp of every inbound SRTP packet. If packet flow freezes despite an open TCP control socket, the dead media channel is detected and torn down.
+- **Remote `BYE` Listener**: A background task listens continuously for incoming SIP `BYE` requests dispatched by OpenSIPS or the outdoor station, acknowledging with `200 OK` and terminating the local media pipeline immediately.
+- **Orphan Auto-Close**: Sessions with no active consumer frame reads for 20 seconds are automatically closed, reclaiming cloud resources and unblocking the physical bus.
+
+### 16.3 Low-Latency Cold Unlock Handshake (`wait_for_sip_connected`)
+Waiting for full H.264 video frame decoding before firing door unlocks adds noticeable latency.
+- To achieve instantaneous response while satisfying the bus power invariant, the unlock coordinator waits only for the SIP `200 OK` dialog establishment (`wait_for_sip_connected`) plus a minimal 0.35s bus voltage stabilization delay before pulsing `POST /smarthome/api/device/command/control`.
+
+### 16.4 Mobile Companion App AbortController & 15 FPS Video Pipeline
+- **AbortController on Disconnect**: `ave-video44-card.js` attaches an `AbortController` to all in-flight `/api/camera_proxy/` frame requests. Backgrounding or closing the Android Companion App triggers `visibilitychange` and `disconnectedCallback`, canceling pending HTTP requests and invoking hangup to eliminate Lovelace "Configuration error" warnings.
+- **15 FPS Smooth Stream**: FFmpeg is configured with `fps=15`, `-fflags nobuffer -flags low_delay`, while the card executes a pipelined 65ms asynchronous frame fetch loop, delivering smooth live video.
+
+
+
 
 
 
