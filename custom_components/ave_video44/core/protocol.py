@@ -13,18 +13,15 @@ from ..const import (
 
 
 def compute_gvs_sign(params: Dict[str, Any], secret: str = DEFAULT_APP_SECRET) -> str:
-    """Compute deterministic HMAC-SHA1 signature conforming to AVE StringUtil.toEncryption.
-
-    Filters out 'sign' and None values, sorts keys alphabetically,
-    computes HMAC-SHA1 digest and returns lowercase base64 string.
-    """
+    """Compute HMAC-SHA1 signature conforming to AVE/GVS cloud."""
     sorted_pairs = [
         f"{k}={params[k]}"
         for k in sorted(params.keys())
-        if k != "sign" and params[k] is not None
+        if k != "sign" and params[k] is not None and str(params[k]).strip() != ""
     ]
     query_str = "&".join(sorted_pairs)
-    mac = hmac.new(secret.encode("utf-8"), query_str.encode("utf-8"), hashlib.sha1).digest()
+    b64_qs = base64.b64encode(query_str.encode("utf-8"))
+    mac = hmac.new(secret.encode("utf-8"), b64_qs, hashlib.sha1).digest()
     return base64.b64encode(mac).decode("utf-8").lower()
 
 

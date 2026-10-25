@@ -67,34 +67,43 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             account = user_input[CONF_ACCOUNT]
             password = user_input[CONF_PASSWORD]
-            api = AveCloudApi()
+            session = None
+            try:
+                from homeassistant.helpers.aiohttp_client import async_get_clientsession
+                session = async_get_clientsession(self.hass)
+            except Exception:
+                pass
+            api = AveCloudApi(session=session)
             try:
                 login_data = await api.login_with_password(account, password)
-                homes = await api.get_home_list()
+                if not login_data.get("token") and not login_data.get("sessionId"):
+                    errors["base"] = "invalid_auth"
+                else:
+                    homes = await api.get_home_list()
 
-                home_id = homes[0].get("homeId") if homes else 1
-                home_name = homes[0].get("homeName", "Casa") if homes else "Casa"
+                    home_id = homes[0].get("homeId") if homes else 1
+                    home_name = homes[0].get("homeName", "Casa") if homes else "Casa"
 
-                unique_id = f"{account}_{home_id}"
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
+                    unique_id = f"{account}_{home_id}"
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_configured()
 
-                return self.async_create_entry(
-                    title=f"{account} ({home_name})",
-                    data={
-                        CONF_ACCOUNT: account,
-                        CONF_PASSWORD: password,
-                        "token": login_data.get("token"),
-                        "session_id": login_data.get("sessionId"),
-                        "home_id": home_id,
-                        "home_name": home_name,
-                    },
-                    options={
-                        CONF_INTERCOM_BOOK: DEFAULT_INTERCOM_BOOK,
-                        CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
-                        CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
-                    },
-                )
+                    return self.async_create_entry(
+                        title=f"{account} ({home_name})",
+                        data={
+                            CONF_ACCOUNT: account,
+                            CONF_PASSWORD: password,
+                            "token": login_data.get("token"),
+                            "session_id": login_data.get("sessionId"),
+                            "home_id": home_id,
+                            "home_name": home_name,
+                        },
+                        options={
+                            CONF_INTERCOM_BOOK: DEFAULT_INTERCOM_BOOK,
+                            CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
+                            CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
+                        },
+                    )
             except Exception as err:
                 _LOGGER.warning("Authentication failed for %s: %s", account, err)
                 errors["base"] = "invalid_auth"
@@ -118,7 +127,13 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._account = user_input[CONF_ACCOUNT]
-            api = AveCloudApi()
+            session = None
+            try:
+                from homeassistant.helpers.aiohttp_client import async_get_clientsession
+                session = async_get_clientsession(self.hass)
+            except Exception:
+                pass
+            api = AveCloudApi(session=session)
             try:
                 await api.request_otp(self._account)
                 return await self.async_step_otp_verify()
@@ -144,34 +159,43 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None and self._account:
             otp = user_input[CONF_OTP]
-            api = AveCloudApi()
+            session = None
+            try:
+                from homeassistant.helpers.aiohttp_client import async_get_clientsession
+                session = async_get_clientsession(self.hass)
+            except Exception:
+                pass
+            api = AveCloudApi(session=session)
             try:
                 login_data = await api.login_with_otp(self._account, otp)
-                homes = await api.get_home_list()
+                if not login_data.get("token") and not login_data.get("sessionId"):
+                    errors["base"] = "invalid_auth"
+                else:
+                    homes = await api.get_home_list()
 
-                home_id = homes[0].get("homeId") if homes else 1
-                home_name = homes[0].get("homeName", "Casa") if homes else "Casa"
+                    home_id = homes[0].get("homeId") if homes else 1
+                    home_name = homes[0].get("homeName", "Casa") if homes else "Casa"
 
-                unique_id = f"{self._account}_{home_id}"
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
+                    unique_id = f"{self._account}_{home_id}"
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_configured()
 
-                return self.async_create_entry(
-                    title=f"{self._account} ({home_name})",
-                    data={
-                        CONF_ACCOUNT: self._account,
-                        CONF_OTP: otp,
-                        "token": login_data.get("token"),
-                        "session_id": login_data.get("sessionId"),
-                        "home_id": home_id,
-                        "home_name": home_name,
-                    },
-                    options={
-                        CONF_INTERCOM_BOOK: DEFAULT_INTERCOM_BOOK,
-                        CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
-                        CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
-                    },
-                )
+                    return self.async_create_entry(
+                        title=f"{self._account} ({home_name})",
+                        data={
+                            CONF_ACCOUNT: self._account,
+                            CONF_OTP: otp,
+                            "token": login_data.get("token"),
+                            "session_id": login_data.get("sessionId"),
+                            "home_id": home_id,
+                            "home_name": home_name,
+                        },
+                        options={
+                            CONF_INTERCOM_BOOK: DEFAULT_INTERCOM_BOOK,
+                            CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
+                            CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
+                        },
+                    )
             except Exception as err:
                 _LOGGER.warning("OTP verification failed for %s: %s", self._account, err)
                 errors["base"] = "invalid_auth"
@@ -199,7 +223,17 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
     """Handle options for AVE Video V44."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+        self._config_entry = config_entry
+
+    @property
+    def config_entry(self) -> config_entries.ConfigEntry:
+        """Return the config entry for this options flow."""
+        if hasattr(self, "_config_entry") and self._config_entry is not None:
+            return self._config_entry
+        try:
+            return super().config_entry
+        except (AttributeError, TypeError):
+            return getattr(self, "_config_entry", None)
 
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -208,14 +242,16 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_book = self.config_entry.options.get(
+        entry = self.config_entry
+        options = entry.options if entry else {}
+        current_book = options.get(
             CONF_INTERCOM_BOOK,
             DEFAULT_INTERCOM_BOOK,
         )
-        current_pulse = self.config_entry.options.get(
+        current_pulse = options.get(
             CONF_UNLOCK_PULSE_DURATION, DEFAULT_UNLOCK_PULSE_DURATION
         )
-        current_stream = self.config_entry.options.get(
+        current_stream = options.get(
             CONF_PREFERRED_VIDEO_STREAM, DEFAULT_PREFERRED_VIDEO_STREAM
         )
 

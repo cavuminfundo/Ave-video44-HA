@@ -74,7 +74,10 @@ def _ensure_ha_stubs():
 
     class OptionsFlow:
         def __init__(self, config_entry=None):
-            self.config_entry = config_entry
+            self._config_entry = config_entry
+        @property
+        def config_entry(self):
+            return getattr(self, "_config_entry", None)
         def async_show_form(self, *, step_id, data_schema=None, errors=None):
             return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {}}
         def async_create_entry(self, *, title, data):
@@ -306,7 +309,7 @@ async def test_flow_user_password_success():
     with patch("custom_components.ave_video44.config_flow.AveCloudApi") as mock_api_cls:
         mock_api = mock_api_cls.return_value
         mock_api.async_close = AsyncMock()
-        mock_api.login_with_password = AsyncMock(return_value={"userId": 1234, "sessionId": "sess_1"})
+        mock_api.login_with_password = AsyncMock(return_value={"userId": 1234, "sessionId": "sess_1", "token": "tok_1"})
         mock_api.get_homes = AsyncMock(return_value=[{"homeId": 101, "homeName": "Casa"}])
         mock_api.get_home_list = AsyncMock(return_value=[{"homeId": 101, "homeName": "Casa"}])
         mock_api.get_devices = AsyncMock(return_value=[])
@@ -349,6 +352,26 @@ async def test_flow_user_password_invalid_auth():
 
 
 @pytest.mark.asyncio
+async def test_flow_user_password_empty_tokens_triggers_invalid_auth():
+    """Verify missing tokens trigger invalid_auth error."""
+    flow = AveVideo44ConfigFlow()
+    flow.hass = MagicMock()
+
+    with patch("custom_components.ave_video44.config_flow.AveCloudApi") as mock_api_cls:
+        mock_api = mock_api_cls.return_value
+        mock_api.async_close = AsyncMock()
+        mock_api.login_with_password = AsyncMock(return_value={"userId": 1234})
+
+        result = await flow.async_step_password({
+            CONF_ACCOUNT: "test@example.com",
+            CONF_PASSWORD: "secret_password",
+        })
+
+        assert result["type"] == "form"
+        assert result["errors"]["base"] == "invalid_auth"
+
+
+@pytest.mark.asyncio
 async def test_flow_otp_success():
     """Test successful OTP login flow."""
     flow = AveVideo44ConfigFlow()
@@ -358,7 +381,7 @@ async def test_flow_otp_success():
         mock_api = mock_api_cls.return_value
         mock_api.async_close = AsyncMock()
         mock_api.request_otp = AsyncMock(return_value=True)
-        mock_api.login_with_otp = AsyncMock(return_value={"userId": 5678, "sessionId": "sess_otp"})
+        mock_api.login_with_otp = AsyncMock(return_value={"userId": 5678, "sessionId": "sess_otp", "token": "tok_otp"})
         mock_api.get_homes = AsyncMock(return_value=[{"homeId": 202, "homeName": "Villa"}])
         mock_api.get_home_list = AsyncMock(return_value=[{"homeId": 202, "homeName": "Villa"}])
         mock_api.get_devices = AsyncMock(return_value=[])
@@ -406,3 +429,18 @@ async def test_options_flow_update():
     assert res_save["type"] == "create_entry"
     assert "1-1-103=Cugino" in res_save["data"][CONF_INTERCOM_BOOK]
     assert res_save["data"][CONF_UNLOCK_PULSE_DURATION] == 3
+
+
+def test_options_flow_read_only_base_property():
+    """Verify AveVideo44OptionsFlow works when base class has read-only config_entry property."""
+    class ReadOnlyBaseOptionsFlow:
+        @property
+        def config_entry(self):
+            raise AttributeError("can't set attribute 'config_entry'")
+
+    class TestOptionsFlow(AveVideo44OptionsFlow, ReadOnlyBaseOptionsFlow):
+        pass
+
+    entry = MagicMock()
+    flow = TestOptionsFlow(entry)
+    assert flow.config_entry == entry

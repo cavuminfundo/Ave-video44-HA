@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.0.1";
+const CARD_VERSION = "1.0.2";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {

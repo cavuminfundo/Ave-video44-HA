@@ -92,11 +92,11 @@ def test_icons_json_and_translation_keys():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     card_js = (ROOT / "custom_components" / "ave_video44" / "frontend" / "ave-video44-card.js").read_text(encoding="utf-8")
 
-    assert manifest["version"] == "1.0.1"
-    assert pyproject["project"]["version"] == "1.0.1"
+    assert manifest["version"] == "1.0.2"
+    assert pyproject["project"]["version"] == "1.0.2"
     match = re.search(r'const\s+CARD_VERSION\s*=\s*"([^"]+)"', card_js)
     assert match is not None
-    assert match.group(1) == "1.0.1"
+    assert match.group(1) == "1.0.2"
 
 
 def test_official_brand_suite_8_files():
@@ -117,4 +117,22 @@ def test_official_brand_suite_8_files():
         data = file_path.read_bytes()
         assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{filename} is not a valid PNG"
         assert len(data) > 4096, f"{filename} size is too small ({len(data)} <= 4096)"
+
+
+def test_diagnostics_redaction():
+    from custom_components.ave_video44.diagnostics import TO_REDACT, async_redact_data
+    for sensitive_key in ("session_id", "sessionId", "jsessionid", "otp", "password", "token"):
+        assert sensitive_key in TO_REDACT, f"Key {sensitive_key} missing from TO_REDACT"
+    sample = {
+        "session_id": "secret_sess",
+        "jsessionid": "secret_cookie",
+        "otp": "123456",
+        "safe_key": "safe_val",
+    }
+    redacted = async_redact_data(sample)
+    assert redacted["session_id"] == "**REDACTED**"
+    assert redacted["jsessionid"] == "**REDACTED**"
+    assert redacted["otp"] == "**REDACTED**"
+    assert redacted["safe_key"] == "safe_val"
+
 

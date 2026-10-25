@@ -15,12 +15,15 @@ from .coordinator import AveVideo44Coordinator
 
 TO_REDACT: Set[str] = {
     "account",
+    "appSecret",
     "email",
+    "jsessionid",
+    "otp",
     "password",
     "sessionId",
-    "token",
+    "session_id",
     "sip_password",
-    "appSecret",
+    "token",
 }
 
 

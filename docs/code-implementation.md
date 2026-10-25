@@ -29,31 +29,52 @@ class AveVideo44ApiClient:
 
 ## 2. Cloud REST API & Cryptographic Signing
 
-### 2.1 HMAC-SHA1 Request Signing (`to_encryption`)
-The AVE/GVS cloud REST endpoints require an HMAC-SHA1 signature over all query/body parameters:
+### 2.1 HMAC-SHA1 Request Signing (`compute_gvs_sign`)
+The AVE/GVS cloud REST endpoints require an HMAC-SHA1 signature over all query and body parameters. Disassembly of `com.gvs.smart.ave` (APK v2.1.2, `StringUtil.toEncryption`) reveals a verified double-Base64 encoding scheme:
 1. Filter out the `sign` key and any keys with `None` values.
 2. Sort remaining parameter keys in ascending alphabetical order.
 3. Format as standard key-value pairs concatenated with `&`: `k1=v1&k2=v2`.
-4. Calculate HMAC-SHA1 digest using the integration's `appSecret`.
-5. Encode the resulting digest in Base64 and convert the string to lowercase:
+4. **Base64 Pre-Encoding**: Encode the ASCII query string into a Base64 string before hashing: `query_b64 = base64.b64encode(query_str.encode("utf-8"))`.
+5. Compute the HMAC-SHA1 digest using the integration's `appSecret` as the key over `query_b64`: `mac = hmac.new(secret.encode("utf-8"), query_b64, hashlib.sha1).digest()`.
+6. Encode the resulting HMAC digest in Base64 and convert the string to lowercase:
 
 ```python
-def sign_request_params(params: dict[str, Any], secret: str = DEFAULT_APP_SECRET) -> str:
+def compute_gvs_sign(params: dict[str, Any], secret: str = DEFAULT_APP_SECRET) -> str:
+    """Verified double-Base64 HMAC-SHA1 signing matching APK v2.1.2."""
     sorted_pairs = [
         f"{k}={params[k]}"
         for k in sorted(params.keys())
         if k != "sign" and params[k] is not None
     ]
     query_str = "&".join(sorted_pairs)
-    mac = hmac.new(secret.encode("utf-8"), query_str.encode("utf-8"), hashlib.sha1).digest()
+    query_b64 = base64.b64encode(query_str.encode("utf-8"))
+    mac = hmac.new(secret.encode("utf-8"), query_b64, hashlib.sha1).digest()
     return base64.b64encode(mac).decode("utf-8").lower()
 ```
 
-### 2.2 Password Hashing
+Formula: `base64(HMAC-SHA1(secret, base64(sorted_query_string))).lower()`
+
+### 2.2 APK v2.1.2 Retrofit Endpoint Contract & Envelope Parsing
+In official Android APK v2.1.2, network calls are defined via Retrofit interfaces exhibiting specific query vs body mappings:
+- **`POST /usercenter/api/uc/loginToGvs/email`**:
+  - `@QueryMap`: Common query parameters (`tenantUuid`, `appUuid`, `ts`, `sign`) must be passed in the URL query string.
+  - `@FieldMap`: Form-urlencoded payload (`account`, `password`, `channel="App"`, or `email`, `code`) is transmitted in the HTTP POST body with `Content-Type: application/x-www-form-urlencoded`.
+- **Response Envelope Structure (`"result"` vs `"data"`)**:
+  - Cloud responses wrap their payload inside either `"result"` or `"data"` (e.g. `{"code": 200, "msg": "success", "result": {...}}`).
+  - Parsing must dynamically evaluate `resp_json.get("result") or resp_json.get("data") or {}` to accommodate both endpoint variations.
+- **Session Cookie (`JSESSIONID`)**:
+  - The server issues a `Set-Cookie: JSESSIONID=...` header on initial authentication.
+  - The cookie must be captured and transmitted in subsequent HTTP requests alongside `token` and `sessionId` headers.
+- **Plant & Device Endpoints**:
+  - `GET /smarthome/api/home/queryHomeList`: Returns registered smart home installations.
+  - `GET /smarthome/api/quick-display-device/user-current-home`: Returns configured quick display intercom stations for the current plant.
+  - `GET /smarthome/api/device/getInfo`: Retrieves comprehensive device metadata and hardware status.
+
+### 2.3 Password Hashing
 - User account passwords are encrypted client-side before transmission: `hashlib.sha256(password.encode("utf-8")).hexdigest().lower()`.
 - The plaintext password is never retained in memory after the authentication exchange or stored on disk.
 
-### 2.3 Transient Failure Resilience
+### 2.4 Transient Failure Resilience
 - On HTTP 429 (Too Many Requests) or 5xx server responses, the client applies truncated exponential backoff with jitter:
   $$T_{\text{wait}} = \min(T_{\max}, 2^{\text{attempt}} \cdot \text{base}) \cdot \text{random}(0.5, 1.5)$$
 - Standard parameters: `base = 1.0`s, `T_max = 30.0`s, `max_retries = 3`.
@@ -187,3 +208,34 @@ def device_info(self) -> DeviceInfo:
         sw_version=self._firmware_version,
     )
 ```
+
+---
+
+## 8. Home Assistant 2025/2026 OptionsFlow Contract & Self-Healing
+
+### 8.1 Read-Only `OptionsFlow.config_entry` Property Invariant
+In Home Assistant Core 2024.11, 2025.x, and 2026.x, `config_entries.OptionsFlow.config_entry` is declared as a read-only `@property`:
+
+```python
+@property
+def config_entry(self) -> ConfigEntry:
+    return self._config_entry
+```
+
+- **Invariant**: Subclasses must NEVER execute `self.config_entry = config_entry` in `__init__`. Doing so triggers an unhandled `AttributeError: property 'config_entry' of 'AveVideo44OptionsFlow' object has no setter`, crashing the Options ("Configure") dialog.
+- **Pattern**:
+  ```python
+  class AveVideo44OptionsFlow(config_entries.OptionsFlow):
+      """Handle options for AVE Video V44."""
+
+      # In HA 2024+, async_get_options_flow automatically handles entry association.
+      # Access self.config_entry directly through the base property without manual assignment.
+  ```
+
+### 8.2 Coordinator State Self-Healing
+In `AveVideo44Coordinator`, when initializing or updating state:
+- If a pre-existing config entry lacks `homeId` or possesses an expired session cookie, the coordinator executes an automatic self-healing routine:
+  1. Refreshes cloud authentication tokens and reacquires `JSESSIONID`.
+  2. Queries `GET /smarthome/api/home/queryHomeList` to resolve the active `homeId`.
+  3. Updates the entry's runtime state dynamically without breaking entity bindings or demanding manual integration reconfiguration.
+

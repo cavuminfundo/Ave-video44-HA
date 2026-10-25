@@ -23,8 +23,8 @@
 - **Local Stream & Socket Framing**:
   - Local stream signaling and event reporting uses standard `0x02 ... 0x03` boundary framing and 4-byte big-endian binary length headers.
 - **Cloud REST API Signing (`https://avev2.gvs-icloud.com/`)**:
-  - Cloud endpoints require an HMAC-SHA1 signature (`to_encryption`).
-  - Query parameters must be sorted alphabetically by key (excluding `sign` and null values), concatenated with `&`, signed with `appSecret`, and output as lowercase Base64 string.
+  - Cloud endpoints require a double-Base64 HMAC-SHA1 signature (`compute_gvs_sign` / `StringUtil.toEncryption`).
+  - Query parameters are sorted alphabetically by key (excluding `sign` and null values), concatenated with `&`, pre-encoded to Base64, hashed with HMAC-SHA1 using `appSecret`, and converted to lowercase Base64: `base64(HMAC-SHA1(secret, base64(sorted_query_string))).lower()`.
 - **MQTTS Push Listener (`eu.emqx.gvs-icloud.com:8883`)**:
   - Doorbell events arrive on `smarthome/device/{deviceId}` and `smarthome/device/status`.
   - Action `1` indicates incoming ring (`CALL_IN`), action `0` indicates call hangup or timeout.
@@ -47,3 +47,23 @@
 ### 5. Isolated Pytest Execution & Sub-Agent Test Ban
 - Automated tests should be invoked using `uv run --with pytest pytest -q --tb=short --maxfail=2`.
 - Sub-agents are strictly forbidden from running test suites to prevent uncoordinated runs, race conditions, or polluting local environments with untracked lock files.
+
+---
+
+## 2026-10-25 — Cloud API v2.1.2 Alignment & Home Assistant 2025/2026 Invariants
+
+### 6. AVE/GVS Double-Base64 HMAC-SHA1 Signature (`compute_gvs_sign`)
+- **Root Cause & Discovery**: Decompilation of the official AVE Android APK v2.1.2 (`StringUtil.toEncryption`) revealed that the sorted query string (`k1=v1&k2=v2`) is encoded in Base64 *before* being passed into the HMAC-SHA1 digest function.
+- **Formula**: `base64(HMAC-SHA1(secret, base64(sorted_query_string))).lower()`
+- **Trap**: Hashing the plaintext query string directly causes the server to reject calls with HTTP 401/403 "signature error" or "invalid signature".
+
+### 7. Retrofit QueryMap / FieldMap Split & JSON Envelopes
+- **Parameter Split on Login**: In `POST /usercenter/api/uc/loginToGvs/email`, common auth parameters (`tenantUuid`, `appUuid`, `ts`, `sign`) are sent as URL query parameters (`@QueryMap`), while user credentials (`account`, `password`, `channel` or `email`, `code`) are sent in the form-urlencoded POST body (`@FieldMap`).
+- **Response Envelope**: AVE/GVS endpoints wrap payloads in `"result"` rather than standard `"data"` (e.g. `{"code": 200, "result": {...}}`). Response parsers must fall back gracefully across `resp.get("result") or resp.get("data")`.
+- **Session Cookie Persistence**: In addition to `token` and `sessionId` headers, `JSESSIONID` from `Set-Cookie` must be maintained for subsequent calls (`queryHomeList`, `user-current-home`, `device/getInfo`).
+
+### 8. Home Assistant 2025/2026 `OptionsFlow.config_entry` Read-Only Invariant
+- **Hazard**: Starting in Home Assistant Core 2024.11 / 2025+, `OptionsFlow.config_entry` is declared as a read-only `@property` without a setter.
+- **Root Cause**: Subclasses that execute `self.config_entry = config_entry` in `__init__` raise `AttributeError: property 'config_entry' of 'AveVideo44OptionsFlow' object has no setter`, breaking the Configure options modal entirely.
+- **Fix**: Never assign `self.config_entry`. Rely on Home Assistant's automatic entry assignment via `async_get_options_flow` and access `self.config_entry` directly through the inherited property.
+

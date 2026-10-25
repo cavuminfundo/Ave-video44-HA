@@ -33,7 +33,9 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             update_interval=None,
         )
         self.entry = entry
+        self.config_entry = entry
         self.entry_id = entry.entry_id
+        self.home_id = entry.data.get("home_id") if getattr(entry, "data", None) else None
 
         session = None
         try:
@@ -181,12 +183,46 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         return f"rtsp://127.0.0.1:554/live/{stream_path}"
 
     async def _async_update_data(self) -> Dict[str, Any]:
-        """Fetch updated device list and metadata from cloud API."""
+        """Fetch updated device list and metadata from cloud API with auto-healing."""
         try:
-            home_id = self.entry.data.get("home_id")
+            if (not self.api.session_id and not self.api.token) or self.home_id in (None, 1, "1"):
+                account = self.config_entry.data.get(CONF_ACCOUNT) if self.config_entry else None
+                password = self.config_entry.data.get(CONF_PASSWORD) if self.config_entry else None
+                if account and password:
+                    try:
+                        login_data = await self.api.login_with_password(account, password)
+                        new_home_id = self.home_id
+                        new_home_name = self.config_entry.data.get("home_name", "Casa") if self.config_entry else "Casa"
+                        if self.home_id in (None, 1, "1"):
+                            homes = await self.api.get_home_list()
+                            if homes:
+                                new_home_id = homes[0].get("homeId", self.home_id)
+                                new_home_name = homes[0].get("homeName", new_home_name)
+                                self.home_id = new_home_id
+
+                        if self.config_entry and hasattr(self.hass, "config_entries") and hasattr(self.hass.config_entries, "async_update_entry"):
+                            new_data = dict(self.config_entry.data)
+                            new_data["token"] = self.api.token or login_data.get("token")
+                            new_data["session_id"] = self.api.session_id or login_data.get("sessionId")
+                            new_data["home_id"] = new_home_id
+                            new_data["home_name"] = new_home_name
+                            self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+                    except Exception as err:
+                        _LOGGER.warning("Coordinator auto-heal login failed: %s", err)
+
+            home_id = self.home_id or (self.entry.data.get("home_id") if self.entry else None)
             devices = await self.api.get_devices(home_id=home_id)
             if devices:
-                self.devices = devices
+                normalized_devices: List[Dict[str, Any]] = []
+                for d in devices:
+                    dev = dict(d) if isinstance(d, dict) else {}
+                    dev["deviceId"] = str(dev.get("deviceId") or dev.get("id") or "")
+                    dev["deviceName"] = dev.get("deviceName") or dev.get("name") or "AVE V44"
+                    dev["deviceModel"] = dev.get("deviceModel") or dev.get("className") or "TS-SMART"
+                    dev["firmwareVersion"] = dev.get("firmwareVersion") or dev.get("version") or "1.0"
+                    dev["online"] = dev.get("online", True)
+                    normalized_devices.append(dev)
+                self.devices = normalized_devices
             return {str(d.get("deviceId")): d for d in self.devices}
         except Exception as err:
             raise UpdateFailed(f"Error fetching AVE devices: {err}") from err

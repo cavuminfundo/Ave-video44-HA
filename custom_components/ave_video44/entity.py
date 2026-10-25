@@ -27,15 +27,16 @@ class AveVideo44BaseEntity(CoordinatorEntity[AveVideo44Coordinator]):
         self._attr_unique_id = f"{coordinator.entry_id}_{self.device_id}_{unique_key}"
 
         dev = self._get_device_data()
-        model = dev.get("deviceModel") or "TS-SMART"
-        name = dev.get("deviceName") or f"Monitor {self.device_id}"
+        model = dev.get("deviceModel") or dev.get("className") or "V44 Intercom"
+        name = dev.get("deviceName") or dev.get("name") or f"Monitor {self.device_id}"
+        sw_version = dev.get("firmwareVersion") or dev.get("version") or "1.0"
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.device_id)},
             name=name,
             manufacturer="AVE",
             model=model,
-            sw_version=dev.get("version"),
+            sw_version=sw_version,
             configuration_url=f"http://{dev.get('ip')}" if dev.get("ip") else None,
         )
 

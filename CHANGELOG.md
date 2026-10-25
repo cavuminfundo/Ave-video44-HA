@@ -16,6 +16,30 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.0.2 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Fixed AVE/GVS Cloud Cryptographic Signature (`compute_gvs_sign`)**: Corrected HMAC-SHA1 signature computation according to official AVE Android APK v2.1.2 disassembly, applying mandatory Base64 pre-encoding of sorted query parameters prior to HMAC-SHA1 hashing (`base64(HMAC-SHA1(secret, base64(sorted_query_string))).lower()`).
+- **Official APK v2.1.2 REST Endpoints Alignment**:
+  - Aligned email login to `POST /usercenter/api/uc/loginToGvs/email` using Retrofit `@QueryMap` URL parameters and form-urlencoded body (`@FieldMap`).
+  - Added robust response envelope parsing supporting both `"result"` and `"data"` JSON payloads.
+  - Added persistent `JSESSIONID` cookie tracking across authenticated cloud requests.
+  - Updated plant and device discovery endpoints to `GET /smarthome/api/home/queryHomeList`, `GET /smarthome/api/quick-display-device/user-current-home`, and `GET /smarthome/api/device/getInfo`.
+- **Automatic Session & Plant (`homeId`) Self-Healing**: Enhanced `AveVideo44Coordinator` with automatic credential verification and transparent `homeId` recovery for pre-existing configuration entries without requiring integration reconfiguration.
+- **Home Assistant 2025/2026 Options Dialog Compatibility Fix**: Fixed `AttributeError: property 'config_entry' of 'AveVideo44OptionsFlow' object has no setter` when opening the integration Configure dialog, respecting Home Assistant Core's read-only `config_entry` property contract.
+
+### 🇮🇹 Italiano
+
+- **Correzione Firma Crittografica Cloud AVE/GVS (`compute_gvs_sign`)**: Corretto il calcolo della firma HMAC-SHA1 in conformità al decompilato dell'APK ufficiale AVE v2.1.2, applicando la codifica Base64 preliminare della query string ordinata prima del digest HMAC-SHA1 (`base64(HMAC-SHA1(secret, base64(sorted_query_string))).lower()`).
+- **Allineamento Endpoint REST con APK Ufficiale v2.1.2**:
+  - Allineato il login email su `POST /usercenter/api/uc/loginToGvs/email` con separazione dei parametri query (`@QueryMap`) e corpo form-urlencoded (`@FieldMap`).
+  - Supportata la doppia decodifica dell'envelope JSON di risposta (`"result"` e `"data"`).
+  - Integrata la persistenza del cookie di sessione `JSESSIONID` per tutte le chiamate successive.
+  - Aggiornati gli endpoint di discovery impianto e dispositivi a `GET /smarthome/api/home/queryHomeList`, `GET /smarthome/api/quick-display-device/user-current-home` e `GET /smarthome/api/device/getInfo`.
+- **Autoriparazione Sessione e Impianto (`homeId`) nel Coordinator**: `AveVideo44Coordinator` ora rileva e ripristina automaticamente sessioni scadute e il parametro `homeId` per voci di configurazione create con versioni precedenti, senza richiedere la riconfigurazione manuale dell'integrazione.
+- **Compatibilità Finestra Opzioni su Home Assistant 2025/2026**: Risolto l'errore `AttributeError: property 'config_entry' of 'AveVideo44OptionsFlow' object has no setter` all'apertura del menu "Configura", rispettando la proprietà in sola lettura `config_entry` introdotta nelle versioni recenti di Home Assistant Core.
+
 ## v1.0.1 — 2026-10-24
 
 ### 🇬🇧 English
