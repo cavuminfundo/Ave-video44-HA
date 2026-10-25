@@ -8,6 +8,23 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+# Voluptuous stub if not present
+try:
+    import voluptuous as vol
+except ImportError:
+    vol_mod = ModuleType("voluptuous")
+    class Schema:
+        def __init__(self, schema): self.schema = schema
+        def __call__(self, val): return val
+    vol_mod.Schema = Schema
+    vol_mod.Required = lambda k, default=None: k
+    vol_mod.Optional = lambda k, default=None: k
+    vol_mod.In = lambda items: items
+    vol_mod.Any = lambda *args: lambda val: val
+    vol_mod.Coerce = lambda t: lambda val: val
+    sys.modules.setdefault("voluptuous", vol_mod)
+    import voluptuous as vol
+
 def _ensure_ha_stubs():
     if "homeassistant" in sys.modules and not isinstance(sys.modules["homeassistant"], MagicMock):
         return
