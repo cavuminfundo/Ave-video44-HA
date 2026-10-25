@@ -19,7 +19,7 @@ def test_manifest_hassfest_and_repo_urls():
     assert raw["codeowners"] == ["@cavuminfundo"]
     assert raw["documentation"] == "https://github.com/cavuminfundo/Ave-video44-HA"
     assert raw["issue_tracker"] == "https://github.com/cavuminfundo/Ave-video44-HA/issues"
-    assert raw.get("dependencies") == ["http"]
+    assert raw.get("dependencies") == ["ffmpeg", "http"]
 
 
 def test_license_file_present():
