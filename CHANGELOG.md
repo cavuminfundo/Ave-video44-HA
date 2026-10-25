@@ -16,6 +16,28 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.1 — 2026-10-25
+
+### 🇬🇧 English
+
+- **Fixed Cold F5 Reload Configuration Error on `Videocitofono` Dashboard**:
+  - Resolved `"Errore di configurazione: Elemento personalizzato inesistente: ave-video44-card"` warning on browser F5 reload by using a standard Lovelace view layout with single-card desktop expansion (`max-width: 780px`) instead of `panel: true` (`hui-panel-view`), ensuring Home Assistant's `ll-rebuild` event is reliably dispatched once custom element scripts finish evaluating.
+  - Implemented non-blocking executor thread offloading (`hass.async_add_executor_job`) for storage dashboard synchronization to prevent event loop blocking.
+- **Fixed Idle Video Viewport & Camera Wake Control Visibility**:
+  - Added strict `isVideoActive` guard ensuring the idle standby graphic (`#videoPlaceholder`) is not prematurely hidden by snapshot image attempts when the 2-wire camera is unpowered.
+  - Added an interactive "Attiva Video" bubble button directly inside `#videoPlaceholder` allowing one-tap camera wake-up directly from the video area.
+  - Wrapped hangup button text inside a dedicated `#hangupLabel` element to preserve the telephone hangup icon across call lifecycle transitions.
+
+### 🇮🇹 Italiano
+
+- **Risolto Errore di Configurazione su Ricarica F5 della Dashboard `Videocitofono`**:
+  - Risolto il messaggio `"Errore di configurazione: Elemento personalizzato inesistente: ave-video44-card"` al ricaricamento forzato della pagina (F5) migrando la vista della plancia da `panel: true` (`hui-panel-view`) a una vista standard con espansione singola scheda centrata a 780px, garantendo la ricezione costante dell'evento `ll-rebuild` dopo l'inizializzazione dello script nel browser.
+  - Sincronizzazione non bloccante della plancia in `.storage` demandata al thread executor (`hass.async_add_executor_job`) per salvaguardare la reattività dell'event loop.
+- **Correzione Viewport Video a Riposo e Controllo Risveglio Telecamera**:
+  - Introdotto il controllo `isVideoActive` per evitare che tentativi di caricamento di `cameraStreamImg` nascondano erroneamente il placeholder a riposo (`#videoPlaceholder`) quando la telecamera a 2 fili è disalimentata.
+  - Inserito un pulsante a bolla interattivo "Attiva Video" direttamente all'interno dell'area `#videoPlaceholder` per risvegliare il posto esterno con un tocco sullo schermo.
+  - Isolato il testo del pulsante di chiusura chiamata in `#hangupLabel` per preservare stabilmente l'icona del ricevitore telefonico durante le transizioni di stato.
+
 ## v1.2.0 — 2026-10-25
 
 ### 🇬🇧 English

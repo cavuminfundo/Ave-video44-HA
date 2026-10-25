@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.2.1";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -147,6 +147,26 @@ class AveVideo44Card extends HTMLElement {
   connectedCallback() {
     window.addEventListener("keydown", this._boundKeyDown);
     this._checkAutoAnswer();
+    this._expandMasonryColumn();
+    setTimeout(() => this._expandMasonryColumn(), 150);
+  }
+
+  _expandMasonryColumn() {
+    try {
+      let el = this.parentElement;
+      while (el && el.tagName !== "HUI-MASONRY-VIEW") {
+        if (el.classList && el.classList.contains("column")) {
+          const cols = el.parentElement;
+          if (cols && cols.id === "columns" && cols.children.length === 1) {
+            el.style.maxWidth = "780px";
+            el.style.width = "100%";
+            el.style.margin = "0 auto";
+          }
+          break;
+        }
+        el = el.parentElement || (el.getRootNode && el.getRootNode().host);
+      }
+    } catch (_e) {}
   }
 
   disconnectedCallback() {
@@ -341,6 +361,25 @@ class AveVideo44Card extends HTMLElement {
           color: var(--ave-text-secondary);
         }
 
+        .placeholder-icon-bubble {
+          width: 76px;
+          height: 76px;
+          border-radius: 50%;
+          background: rgba(41, 182, 246, 0.16);
+          border: 1px solid rgba(41, 182, 246, 0.35);
+          color: #29b6f6;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 4px;
+          transition: transform 0.2s ease, background 0.2s ease;
+        }
+
+        .video-placeholder:hover .placeholder-icon-bubble {
+          transform: scale(1.06);
+          background: rgba(41, 182, 246, 0.26);
+        }
+
         .caller-banner {
           position: absolute;
           top: 12px;
@@ -448,6 +487,15 @@ class AveVideo44Card extends HTMLElement {
           background-color: #1d4ed8;
         }
 
+        .btn-monitor {
+          background-color: #0284c7;
+          color: #ffffff;
+        }
+
+        .btn-monitor:hover {
+          background-color: #0369a1;
+        }
+
         .intercom-row {
           display: flex;
           gap: 8px;
@@ -506,9 +554,11 @@ class AveVideo44Card extends HTMLElement {
             <span id="callDurationText">00:00</span>
           </div>
 
-          <div class="video-placeholder" id="videoPlaceholder">
-            <ha-icon icon="mdi:cctv" style="--mdc-icon-size: 48px;"></ha-icon>
-            <span id="placeholderText">Anteprima telecamera in caricamento</span>
+          <div class="video-placeholder" id="videoPlaceholder" role="button" tabindex="0" aria-label="Attiva video posto esterno">
+            <div class="placeholder-icon-bubble">
+              <ha-icon icon="mdi:video-wireless-outline" style="--mdc-icon-size: 42px;"></ha-icon>
+            </div>
+            <span id="placeholderText">Tocca qui o premi "Attiva Video" per aprire la telecamera</span>
           </div>
 
           <img id="cameraStreamImg" class="video-element hidden" alt="Live Camera Feed" />
@@ -523,7 +573,7 @@ class AveVideo44Card extends HTMLElement {
             </button>
             <button id="btnHangup" class="btn-hangup" aria-label="Chiudi o rifiuta la chiamata">
               <span class="btn-icon-bubble"><ha-icon icon="mdi:phone-hangup"></ha-icon></span>
-              <span>Rifiuta</span>
+              <span id="hangupLabel">Rifiuta</span>
             </button>
             <button id="btnMute" class="btn-surface" aria-label="Attiva o disattiva microfono">
               <span class="btn-icon-bubble"><ha-icon id="muteIcon" icon="mdi:microphone"></ha-icon></span>
@@ -536,7 +586,7 @@ class AveVideo44Card extends HTMLElement {
           </div>
 
           <div id="idleControls" class="button-group">
-            <button id="btnMonitor" class="btn-surface" aria-label="Attiva telecamera esterna">
+            <button id="btnMonitor" class="btn-monitor" aria-label="Attiva telecamera esterna">
               <span class="btn-icon-bubble"><ha-icon icon="mdi:cctv"></ha-icon></span>
               <span>Attiva Video</span>
             </button>
@@ -661,7 +711,8 @@ class AveVideo44Card extends HTMLElement {
     this._updateDynamicContent();
 
     const cameraEntity = this._config.entity || this._config.camera_entity;
-    if (cameraEntity && this._hass && this._hass.states[cameraEntity]) {
+    const isVideoActive = Boolean(this._inCall || this._callState === "monitoring" || this._callState === "talking" || this._callState === "ringing");
+    if (isVideoActive && cameraEntity && this._hass && this._hass.states[cameraEntity]) {
       const token = this._hass.states[cameraEntity].attributes ? this._hass.states[cameraEntity].attributes.access_token : "";
       let streamUrl = token
         ? `/api/camera_proxy_stream/${cameraEntity}?token=${token}`
@@ -709,9 +760,16 @@ class AveVideo44Card extends HTMLElement {
         videoPlaceholder.classList.add("hidden");
       }
     } else {
-      if (cameraStreamImg) cameraStreamImg.classList.add("hidden");
-      if (liveVideo) liveVideo.classList.add("hidden");
-      if (videoPlaceholder) videoPlaceholder.classList.remove("hidden");
+      if (cameraStreamImg) {
+        cameraStreamImg.classList.add("hidden");
+        cameraStreamImg.removeAttribute("src");
+      }
+      if (liveVideo) {
+        liveVideo.classList.add("hidden");
+      }
+      if (videoPlaceholder) {
+        videoPlaceholder.classList.remove("hidden");
+      }
     }
 
     if (this._inCall) {
@@ -729,12 +787,9 @@ class AveVideo44Card extends HTMLElement {
           btnAnswer.classList.remove("hidden");
         }
       }
-      const btnHangup = shadow.getElementById("btnHangup");
-      if (btnHangup) {
-        const span = btnHangup.querySelector("span");
-        if (span) {
-          span.textContent = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
-        }
+      const hangupLabel = shadow.getElementById("hangupLabel");
+      if (hangupLabel) {
+        hangupLabel.textContent = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
       }
       if (placeholderText) {
         placeholderText.textContent = "Streaming audio/video in corso";
@@ -1218,3 +1273,5 @@ if (!window.customCards.some(function(c) { return c.type === "ave-video44-card";
     description: "Card Lovelace interattiva per videocitofoni AVE Video V44 con audio full-duplex WebAudio."
   });
 }
+
+window.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));

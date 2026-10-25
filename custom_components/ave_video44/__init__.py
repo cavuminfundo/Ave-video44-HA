@@ -1,5 +1,6 @@
 """The AVE Video V44 Home Assistant integration."""
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.2.0"
+_CARD_VERSION = "1.2.1"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -48,7 +49,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.2.0"
+    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.2.1"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
 
@@ -74,7 +75,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     # 2) Call add_extra_js_url
     try:
         from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, "/ave_video44_card/ave-video44-card.js?v=1.2.0")
+        add_extra_js_url(hass, "/ave_video44_card/ave-video44-card.js?v=1.2.1")
     except Exception as err:
         _LOGGER.debug("Could not call add_extra_js_url: %s", err)
 
@@ -174,6 +175,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _sync_storage_files(storage_dir: Path, enable_sidebar: bool) -> None:
+    """Synchronize Lovelace storage files without blocking the event loop."""
+    if not storage_dir.exists():
+        return
+
+    import json
+
+    dashboards_file = storage_dir / "lovelace_dashboards"
+    if dashboards_file.exists():
+        try:
+            dash_content = json.loads(dashboards_file.read_text(encoding="utf-8"))
+            items = dash_content.get("data", {}).get("items", [])
+            updated = False
+            for item in items:
+                if item.get("id") == "ave_video44" or item.get("url_path") == "ave-video44":
+                    item["show_in_sidebar"] = bool(enable_sidebar)
+                    item["mode"] = "storage"
+                    updated = True
+                    break
+            if not updated and enable_sidebar:
+                items.append({
+                    "id": "ave_video44",
+                    "show_in_sidebar": True,
+                    "icon": "mdi:doorbell-video",
+                    "title": "Videocitofono",
+                    "require_admin": False,
+                    "mode": "storage",
+                    "url_path": "ave-video44",
+                })
+            dashboards_file.write_text(json.dumps(dash_content, indent=2), encoding="utf-8")
+        except Exception as d_err:
+            _LOGGER.debug("Could not update lovelace_dashboards: %s", d_err)
+
+    ave_dash_file = storage_dir / "lovelace.ave_video44"
+    if ave_dash_file.exists():
+        try:
+            ave_content = json.loads(ave_dash_file.read_text(encoding="utf-8"))
+            views = ave_content.get("data", {}).get("config", {}).get("views", [])
+            if views and isinstance(views[0], dict):
+                # Remove "type": "panel" so Lovelace uses standard hui-masonry-view
+                # which natively handles "ll-rebuild" on F5 reload without error card trapping
+                views[0].pop("type", None)
+                ave_dash_file.write_text(json.dumps(ave_content, indent=2), encoding="utf-8")
+        except Exception as a_err:
+            _LOGGER.debug("Could not update lovelace.ave_video44 view to masonry: %s", a_err)
+
+
 async def _async_sync_sidebar_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Sync native Lovelace storage dashboard panel and sidebar visibility."""
     try:
@@ -196,47 +244,13 @@ async def _async_sync_sidebar_dashboard(hass: HomeAssistant, entry: ConfigEntry)
             else Path("/config")
         )
         storage_dir = config_dir / ".storage"
-        if not storage_dir.exists():
-            return
 
-        dashboards_file = storage_dir / "lovelace_dashboards"
-        if dashboards_file.exists():
-            try:
-                import json
-                dash_content = json.loads(dashboards_file.read_text(encoding="utf-8"))
-                items = dash_content.get("data", {}).get("items", [])
-                updated = False
-                for item in items:
-                    if item.get("id") == "ave_video44" or item.get("url_path") == "ave-video44":
-                        item["show_in_sidebar"] = bool(enable_sidebar)
-                        item["mode"] = "storage"
-                        updated = True
-                        break
-                if not updated and enable_sidebar:
-                    items.append({
-                        "id": "ave_video44",
-                        "show_in_sidebar": True,
-                        "icon": "mdi:doorbell-video",
-                        "title": "Videocitofono",
-                        "require_admin": False,
-                        "mode": "storage",
-                        "url_path": "ave-video44",
-                    })
-                dashboards_file.write_text(json.dumps(dash_content, indent=2), encoding="utf-8")
-            except Exception as d_err:
-                _LOGGER.debug("Could not update lovelace_dashboards: %s", d_err)
-
-        ave_dash_file = storage_dir / "lovelace.ave_video44"
-        if ave_dash_file.exists():
-            try:
-                import json
-                ave_content = json.loads(ave_dash_file.read_text(encoding="utf-8"))
-                views = ave_content.get("data", {}).get("config", {}).get("views", [])
-                if views and isinstance(views[0], dict):
-                    views[0]["type"] = "panel"
-                    ave_dash_file.write_text(json.dumps(ave_content, indent=2), encoding="utf-8")
-            except Exception as a_err:
-                _LOGGER.debug("Could not update lovelace.ave_video44 view to panel: %s", a_err)
+        if hasattr(hass, "async_add_executor_job"):
+            job = hass.async_add_executor_job(_sync_storage_files, storage_dir, bool(enable_sidebar))
+            if asyncio.iscoroutine(job):
+                await job
+        else:
+            _sync_storage_files(storage_dir, bool(enable_sidebar))
     except Exception as err:
         _LOGGER.debug("Could not sync sidebar dashboard: %s", err)
 

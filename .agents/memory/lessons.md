@@ -114,6 +114,21 @@
 - **Customizable Title Invariant**: Exposing `config.title` both in YAML and in `getConfigElement()` (`ave-video44-card-editor`) gives users full control over dashboard branding while defaulting sensibly to `"AVE Video V44"`.
 - **Panel Mode Overflow Guard**: In full panel dashboards (`type: "panel"`), elements can stretch excessively on ultra-wide desktop monitors. Clamping the card container to `max-width: 780px` with `margin: 0 auto` and `repeat(auto-fit, minmax(200px, 1fr))` ensures aesthetic balance across all form factors.
 
+---
+
+## 2026-10-25 — v1.2.1 Lovelace hui-panel-view Cold Reload & Idle Viewport Guard
+
+### 17. Lovelace hui-panel-view Cold Reload Limitation & Rebuild Reliability
+- Cold Reload Timing Hazard: In Home Assistant Lovelace dashboards configured with `panel: true` (`hui-panel-view`), hard browser reloads (F5) can fail to re-render custom cards if the JS bundle loads after the initial layout render, as `hui-panel-view` does not always subscribe to or bubble the standard `ll-rebuild` event.
+- Fix: Use a standard Lovelace view with single-card desktop width expansion (`max-width: 780px`, `margin: 0 auto`). This ensures Home Assistant's standard view reconciler fires `ll-rebuild` whenever custom element definitions settle, eliminating the "Elemento personalizzato inesistente" warning.
+- Non-Blocking Storage Sync: Dashboard JSON generation in `.storage/lovelace_dashboards` should always run inside `hass.async_add_executor_job` to avoid blocking Home Assistant's main event loop during disk writes.
+
+### 18. Frontend isVideoActive Guard & Idle Viewport Placeholder
+- Standby Camera Power-Down: Because 2-wire outdoor cameras are physically unpowered when idle, loading a camera image snapshot during idle states is invalid.
+- Viewport State Coordination: Always guard image and video element visibility with an explicit `isVideoActive` check (`call_state !== "idle"`). Without this check, image error/load callbacks can hide `#videoPlaceholder`, leaving a blank black box instead of the standby background.
+- Direct Viewport Interaction: Providing a wake bubble button directly inside the idle `#videoPlaceholder` improves tactile usability by allowing users to tap the screen directly to start monitoring.
+
+
 
 
 
