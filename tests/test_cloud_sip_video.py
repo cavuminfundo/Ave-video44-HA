@@ -828,14 +828,8 @@ async def test_camera_notify_frame_read_called(mock_coordinator):
 
 @pytest.mark.asyncio
 async def test_cloud_sip_ffmpeg_target_fps_and_command():
-    """Verify CloudSipMediaSession uses MJPEG_TARGET_FPS = 25 and includes fps=25 in FFmpeg command."""
-    from custom_components.ave_video44.core.sip_session import (
-        CloudSipMediaSession,
-        MJPEG_TARGET_FPS,
-    )
-
-    assert MJPEG_TARGET_FPS == 25
-    assert CloudSipMediaSession.MJPEG_TARGET_FPS == 25
+    """Verify CloudSipMediaSession uses -fps_mode passthrough, wallclock timestamps, and scale=640:-1."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
 
     session = CloudSipMediaSession(
         device_id="dev123",
@@ -878,11 +872,20 @@ async def test_cloud_sip_ffmpeg_target_fps_and_command():
         assert started is True
         mock_exec.assert_called_once()
         cmd_args = mock_exec.call_args[0]
+
+        assert "-fps_mode" in cmd_args
+        fps_mode_idx = cmd_args.index("-fps_mode")
+        assert cmd_args[fps_mode_idx + 1] == "passthrough"
+
+        assert "-use_wallclock_as_timestamps" in cmd_args
+        wallclock_idx = cmd_args.index("-use_wallclock_as_timestamps")
+        assert cmd_args[wallclock_idx + 1] == "1"
+
         assert "-vf" in cmd_args
         vf_idx = cmd_args.index("-vf")
         vf_val = cmd_args[vf_idx + 1]
-        assert "fps=25" in vf_val
-        assert vf_val == f"fps={MJPEG_TARGET_FPS},scale=640:-1"
+        assert "fps=" not in vf_val
+        assert "scale=640:-1" in vf_val
         await session.async_stop()
 
 

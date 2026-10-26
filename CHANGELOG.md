@@ -16,6 +16,22 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.12 — 2026-10-26
+
+### 🇬🇧 English
+
+- **FFmpeg Passthrough & Video Latency Telemetry**:
+  - Replaced `fps=25` filter with `-fps_mode passthrough` and `-use_wallclock_as_timestamps 1` in FFmpeg video decoding pipeline, eliminating artificial frame duplication, drops, and ~3.5s video stalls caused by rate governor mismatch with source frame rates (~19 fps).
+  - Event loop latency telemetry: monitors asyncio event loop responsiveness every 50 ms and logs maximum lag every 5 seconds.
+  - FFmpeg process CPU telemetry: monitors process CPU utilization via `/proc/<pid>/stat` and system load average (`load1`) every 5 seconds.
+
+### 🇮🇹 Italiano
+
+- **FFmpeg Passthrough e Telemetria Latenza Video**:
+  - Sostituito il filtro `fps=25` con `-fps_mode passthrough` e `-use_wallclock_as_timestamps 1` nella pipeline di decodifica FFmpeg, eliminando duplicazione/scarto artificiale di frame e stalli da ~3.5 s dovuti alla discrepanza rispetto al frame rate sorgente (~19 fps).
+  - Telemetria lag event loop: monitora la reattività dell'event loop asyncio ogni 50 ms e registra il ritardo massimo ogni 5 secondi.
+  - Telemetria CPU processo FFmpeg: calcola l'utilizzo CPU del processo da `/proc/<pid>/stat` e il load average di sistema (`load1`) ogni 5 secondi.
+
 ## v1.2.11 — 2026-10-26
 
 ### 🇬🇧 English

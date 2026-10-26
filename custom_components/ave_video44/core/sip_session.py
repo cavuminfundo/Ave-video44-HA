@@ -24,8 +24,6 @@ from .protocol import alaw_to_pcm16, pcm16_to_alaw
 
 _LOGGER = logging.getLogger(__name__)
 
-MJPEG_TARGET_FPS = 25
-
 
 class AveSipSession(asyncio.DatagramProtocol):
     """SIP session and full-duplex RTP audio engine for AVE Video V44."""
@@ -292,7 +290,6 @@ class AveSipSession(asyncio.DatagramProtocol):
 class CloudSipMediaSession:
     """SIP media session for AVE Cloud (TS-SMART 2-wire) H.264 SRTP video decoding."""
 
-    MJPEG_TARGET_FPS: int = MJPEG_TARGET_FPS
     _last_session_stop_ts: float = 0.0
 
     def __init__(
@@ -693,6 +690,59 @@ class CloudSipMediaSession:
                     break
                 self._feed_mjpeg_bytes(chunk)
         except (asyncio.CancelledError, Exception):
+            pass
+
+    async def _event_loop_lag_loop(self) -> None:
+        """Monitor event loop lag and FFmpeg CPU usage."""
+        max_lag_ms = 0.0
+        last_log = time.monotonic()
+        clk_tck = 100
+        try:
+            clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        except Exception:
+            pass
+        last_cpu_ticks: Optional[int] = None
+        last_cpu_time = last_log
+
+        try:
+            while self.is_active:
+                t0 = time.monotonic()
+                await asyncio.sleep(0.05)
+                elapsed = time.monotonic() - t0
+                lag_ms = max(0.0, (elapsed - 0.05) * 1000.0)
+                if lag_ms > max_lag_ms:
+                    max_lag_ms = lag_ms
+
+                now = time.monotonic()
+                if now - last_log >= 5.0:
+                    _LOGGER.debug("event loop lag max_ms=%.0f", max_lag_ms)
+                    last_log = now
+                    max_lag_ms = 0.0
+
+                    try:
+                        proc = self._ffmpeg_proc
+                        if proc and proc.pid:
+                            with open(f"/proc/{proc.pid}/stat", "r", encoding="utf-8") as f:
+                                data = f.read()
+                            idx = data.rfind(")")
+                            if idx != -1:
+                                fields = data[idx + 2:].split()
+                                total_ticks = int(fields[11]) + int(fields[12])
+                                if last_cpu_ticks is not None:
+                                    cpu_elapsed = now - last_cpu_time
+                                    if cpu_elapsed > 0:
+                                        cpu_sec = (total_ticks - last_cpu_ticks) / clk_tck
+                                        cpu_pct = (cpu_sec / cpu_elapsed) * 100.0
+                                        _LOGGER.debug(
+                                            "ffmpeg cpu=%.0f%% load1=%.2f",
+                                            cpu_pct,
+                                            os.getloadavg()[0],
+                                        )
+                                last_cpu_ticks = total_ticks
+                                last_cpu_time = now
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
             pass
 
     async def _udp_relay_loop(
@@ -1130,8 +1180,10 @@ class CloudSipMediaSession:
                 "-fflags", "nobuffer",
                 "-flags", "low_delay",
                 "-protocol_whitelist", "file,udp,rtp,srtp,crypto",
+                "-use_wallclock_as_timestamps", "1",
                 "-i", self._sdp_path,
-                "-vf", f"fps={MJPEG_TARGET_FPS},scale=640:-1",
+                "-vf", "scale=640:-1",
+                "-fps_mode", "passthrough",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
                 "-q:v", "6",
@@ -1160,6 +1212,7 @@ class CloudSipMediaSession:
             )
             self._sip_rx_task = asyncio.create_task(self._sip_rx_loop())
             self._tasks.append(self._sip_rx_task)
+            self._tasks.append(asyncio.create_task(self._event_loop_lag_loop()))
 
             await self.wait_for_first_frame(timeout=2.5)
             return True
