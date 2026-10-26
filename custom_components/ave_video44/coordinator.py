@@ -6,7 +6,7 @@ import inspect
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import urllib.parse
 
 from homeassistant.core import HomeAssistant
@@ -63,6 +63,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.mqtt_listener: Optional[AveMqttListener] = None
         self._last_frame_request_ts: Dict[str, float] = {}
         self._watchdog_tasks: Dict[str, asyncio.Task] = {}
+        self.user_hangup: Set[str] = set()
 
         self.devices: List[Dict[str, Any]] = []
         self.call_state: str = "idle"
@@ -192,6 +193,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         """Wake outdoor camera / start live monitoring session."""
         _LOGGER.debug("Waking camera for device %s", device_id)
         dev_str = str(device_id)
+        self.user_hangup.discard(dev_str)
         wake_ev = asyncio.Event()
         self._wake_events[dev_str] = wake_ev
 
@@ -432,6 +434,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         """Terminate active call or monitoring session."""
         _LOGGER.debug("Hanging up call/monitoring on device %s", device_id)
         dev_str = str(device_id)
+        self.user_hangup.add(dev_str)
         watchdog = self._watchdog_tasks.pop(dev_str, None)
         if watchdog and not watchdog.done():
             watchdog.cancel()

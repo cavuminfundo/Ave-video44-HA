@@ -919,6 +919,7 @@ async def test_coordinator_async_wake_camera_and_hangup(mock_coordinator):
     assert url == "rtsps://user%21123:pwd%40456@eu-video.gvs-icloud.com:8322/stream/1/677771932745207808/0/1"
     assert mock_coordinator.active_rtsp_url == url
     assert mock_coordinator.get_rtsp_url("677771932745207808") == url
+    assert "677771932745207808" not in mock_coordinator.user_hangup
 
     # 2. Hangup stops monitoring with action=3 and clears state
     await mock_coordinator.async_hangup_call("677771932745207808")
@@ -926,6 +927,7 @@ async def test_coordinator_async_wake_camera_and_hangup(mock_coordinator):
     assert mock_coordinator.active_rtsp_url is None
     assert mock_coordinator.call_state == "idle"
     assert mock_coordinator.get_rtsp_url("677771932745207808") is None
+    assert "677771932745207808" in mock_coordinator.user_hangup
 
 
 @pytest.mark.asyncio

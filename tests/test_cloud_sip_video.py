@@ -610,6 +610,130 @@ async def test_camera_handle_async_mjpeg_stream_boundary_and_chunks(mock_coordin
 
 
 @pytest.mark.asyncio
+async def test_camera_mjpeg_stream_auto_renew_after_remote_bye(mock_coordinator):
+    """Verify camera handle_async_mjpeg_stream auto-renews session on remote BYE and writes new frames."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+
+    dev_id = "9991"
+    session1 = MagicMock()
+    session1.is_active = True
+    session1.remote_bye = True
+    session1.frame_seq = 1
+    session1.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_1\xff\xd9")
+
+    async def _mock_wait_next1(last_seq, timeout=0.5):
+        session1.is_active = False
+        return last_seq + 1, b"\xff\xd8fake_jpeg_1_b\xff\xd9"
+
+    session1.wait_for_next_frame = AsyncMock(side_effect=_mock_wait_next1)
+
+    session2 = MagicMock()
+    session2.is_active = True
+    session2.remote_bye = False
+    session2.frame_seq = 1
+    session2.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_2\xff\xd9")
+
+    async def _mock_wait_next2(last_seq, timeout=0.5):
+        session2.is_active = False
+        return last_seq + 1, b"\xff\xd8fake_jpeg_2_b\xff\xd9"
+
+    session2.wait_for_next_frame = AsyncMock(side_effect=_mock_wait_next2)
+
+    mock_coordinator.cloud_sip_sessions = {dev_id: session1}
+    mock_coordinator.user_hangup = set()
+    mock_coordinator.async_wait_for_wake = AsyncMock()
+
+    async def _mock_wake(device_id):
+        mock_coordinator.cloud_sip_sessions[dev_id] = session2
+
+    mock_coordinator.async_wake_camera = AsyncMock(side_effect=_mock_wake)
+
+    cam = AveVideo44Camera(mock_coordinator, device_id=dev_id)
+
+    written_parts = []
+    fake_response = MagicMock()
+    fake_response.prepare = AsyncMock()
+    async def _mock_write(data):
+        written_parts.append(data)
+    fake_response.write = AsyncMock(side_effect=_mock_write)
+
+    with patch("aiohttp.web.StreamResponse", return_value=fake_response) as mock_stream_resp:
+        request = MagicMock()
+        resp = await cam.handle_async_mjpeg_stream(request)
+
+        assert resp is fake_response
+        mock_stream_resp.assert_called_once()
+        mock_coordinator.async_wake_camera.assert_called_once_with(dev_id)
+        written_bytes = b"".join(written_parts)
+        assert b"fake_jpeg_1" in written_bytes
+        assert b"fake_jpeg_2" in written_bytes
+
+
+@pytest.mark.asyncio
+async def test_camera_mjpeg_stream_no_renew_on_user_hangup(mock_coordinator):
+    """Verify camera handle_async_mjpeg_stream does not renew if user requested hangup."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+
+    dev_id = "9991"
+    session1 = MagicMock()
+    session1.is_active = False
+    session1.remote_bye = True
+    session1.frame_seq = 1
+    session1.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_1\xff\xd9")
+    session1.wait_for_next_frame = AsyncMock(return_value=(1, None))
+
+    mock_coordinator.cloud_sip_sessions = {dev_id: session1}
+    mock_coordinator.user_hangup = {dev_id}
+    mock_coordinator.async_wait_for_wake = AsyncMock()
+    mock_coordinator.async_wake_camera = AsyncMock()
+
+    cam = AveVideo44Camera(mock_coordinator, device_id=dev_id)
+
+    fake_response = MagicMock()
+    fake_response.prepare = AsyncMock()
+    fake_response.write = AsyncMock()
+
+    with patch("aiohttp.web.StreamResponse", return_value=fake_response):
+        request = MagicMock()
+        resp = await cam.handle_async_mjpeg_stream(request)
+
+        assert resp is fake_response
+        mock_coordinator.async_wake_camera.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_camera_mjpeg_stream_stops_after_three_renew_failures(mock_coordinator):
+    """Verify camera handle_async_mjpeg_stream terminates after 3 consecutive failed renewals."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+
+    dev_id = "9991"
+    session1 = MagicMock()
+    session1.is_active = False
+    session1.remote_bye = True
+    session1.frame_seq = 1
+    session1.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_1\xff\xd9")
+    session1.wait_for_next_frame = AsyncMock(return_value=(1, None))
+
+    mock_coordinator.cloud_sip_sessions = {dev_id: session1}
+    mock_coordinator.user_hangup = set()
+    mock_coordinator.async_wait_for_wake = AsyncMock()
+    mock_coordinator.async_wake_camera = AsyncMock()
+
+    cam = AveVideo44Camera(mock_coordinator, device_id=dev_id)
+
+    fake_response = MagicMock()
+    fake_response.prepare = AsyncMock()
+    fake_response.write = AsyncMock()
+
+    with patch("aiohttp.web.StreamResponse", return_value=fake_response):
+        request = MagicMock()
+        resp = await cam.handle_async_mjpeg_stream(request)
+
+        assert resp is fake_response
+        assert mock_coordinator.async_wake_camera.call_count == 3
+
+
+@pytest.mark.asyncio
 async def test_coordinator_wake_camera_cloud_sip_avoids_rtsps_and_syncs_wake_event(mock_coordinator):
     """Verify async_wake_camera on TS-SMART 2-wire uses Cloud SIP exclusively without RTSPS 8322."""
     dev_id = "677771932745207808"

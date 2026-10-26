@@ -16,6 +16,22 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.13 — 2026-10-26
+
+### 🇬🇧 English
+
+- **Seamless Video Auto-Renewal on Remote BYE & Session-Expires Logging**:
+  - Transparent auto-renewal in `camera.py`: when AVE cloud terminates video monitoring with a remote SIP BYE (~32s), the MJPEG stream automatically triggers coordinator camera wake and seamlessly transitions to the renewed session without closing or resetting the HTTP response (up to 20 renewals per connection, max 3 consecutive failures).
+  - Explicit hangup tracking: coordinator maintains `user_hangup` state to avoid renewing streams when the user explicitly terminates or answers the call.
+  - SIP session timing telemetry: logs negotiated `Session-Expires`, `Min-SE`, `Supported`, `Expires`, and `Server` headers from SIP 200 OK responses to aid in session timer diagnosis.
+
+### 🇮🇹 Italiano
+
+- **Rinnovo Automatico Sessione Video su BYE Remoto e Log Session-Expires**:
+  - Rinnovo trasparente in `camera.py`: quando il cloud AVE invia un BYE remoto (~32s) terminando il monitoraggio video, lo stream MJPEG chiama automaticamente il wake del coordinator passando alla nuova sessione senza interrompere o chiudere la connessione HTTP (fino a 20 rinnovi per connessione, max 3 tentativi consecutivi).
+  - Tracciamento hangup utente: il coordinator tiene traccia dello stato `user_hangup` per impedire rinnovi indesiderati in caso di chiusura manuale o risposta alla chiamata.
+  - Telemetria timer di sessione SIP: registra a debug gli header `Session-Expires`, `Min-SE`, `Supported`, `Expires` e `Server` ricevuti nel 200 OK SIP per diagnosticare i timer di scadenza della sessione.
+
 ## v1.2.12 — 2026-10-26
 
 ### 🇬🇧 English

@@ -331,6 +331,7 @@ class CloudSipMediaSession:
         self._sip_connected_event = asyncio.Event()
         self._last_rtp_ts: float = 0.0
         self.is_active: bool = False
+        self.remote_bye: bool = False
         self._mjpeg_last_log: float = 0.0
         self._mjpeg_last_seq: int = 0
         self._mjpeg_last_frame_ts: float = 0.0
@@ -843,6 +844,7 @@ class CloudSipMediaSession:
                         self._read_sip_msg(), timeout=2.0
                     )
                     if start_line.startswith("BYE "):
+                        self.remote_bye = True
                         reason = headers.get("reason")
                         cseq_val = headers.get("cseq", "1 BYE")
                         useful_hdrs = [f"cseq={cseq_val}"]
@@ -1110,6 +1112,14 @@ class CloudSipMediaSession:
                 _LOGGER.warning("SIP INVITE did not receive 200 OK: %s", start_line)
                 await self.async_stop()
                 return False
+
+            sess_hdrs = [
+                f"{h}={headers[h]}"
+                for h in ("session-expires", "min-se", "supported", "expires", "server")
+                if h in headers
+            ]
+            if sess_hdrs:
+                _LOGGER.debug("SIP 200 OK headers: %s", ", ".join(sess_hdrs))
 
             to_header = headers.get("to", f"<{self.target_sip_uri}>")
             contact_header = headers.get("contact", "")

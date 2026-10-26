@@ -13,6 +13,9 @@ from .entity import AveVideo44BaseEntity
 
 _LOGGER = logging.getLogger(__name__)
 
+MAX_MJPEG_RENEWALS: int = 20
+MAX_CONSECUTIVE_RENEW_FAILURES: int = 3
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -137,13 +140,89 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                     last_serve_log = last_send_ts
                     max_send_gap_ms = 0.0
 
-                    last_seq = session.frame_seq
-                    while session.is_active:
-                        if hasattr(self.coordinator, "notify_frame_read"):
-                            self.coordinator.notify_frame_read(self.device_id)
-                        next_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.5)
-                        if next_seq > last_seq and new_frame is not None:
-                            last_seq = next_seq
+                    renewals = 0
+                    consecutive_failures = 0
+
+                    while True:
+                        last_seq = session.frame_seq
+                        while session.is_active:
+                            if hasattr(self.coordinator, "notify_frame_read"):
+                                self.coordinator.notify_frame_read(self.device_id)
+                            next_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.5)
+                            if next_seq > last_seq and new_frame is not None:
+                                last_seq = next_seq
+                                p_header = (
+                                    f"--frameboundary\r\n"
+                                    f"Content-Type: image/jpeg\r\n"
+                                    f"Content-Length: {len(new_frame)}\r\n\r\n"
+                                ).encode("utf-8")
+                                p = p_header + new_frame + b"\r\n"
+                                await response.write(p)
+                                drain_fn = getattr(response, "drain", None)
+                                if callable(drain_fn):
+                                    drain_res = drain_fn()
+                                    if asyncio.iscoroutine(drain_res):
+                                        await drain_res
+                                served_frames += 1
+                                now = time.monotonic()
+                                if last_send_ts > 0.0:
+                                    gap_ms = (now - last_send_ts) * 1000.0
+                                    if gap_ms > max_send_gap_ms:
+                                        max_send_gap_ms = gap_ms
+                                last_send_ts = now
+
+                            now = time.monotonic()
+                            if now - last_serve_log >= 5.0:
+                                _LOGGER.debug(
+                                    "mjpeg serve frames=%d max_send_gap_ms=%.0f",
+                                    served_frames,
+                                    max_send_gap_ms,
+                                )
+                                last_serve_log = now
+                                max_send_gap_ms = 0.0
+
+                        user_hungup = False
+                        if hasattr(self.coordinator, "user_hangup"):
+                            user_hungup = str(self.device_id) in self.coordinator.user_hangup
+
+                        is_remote_bye = getattr(session, "remote_bye", False) is True
+                        if not is_remote_bye or user_hungup or renewals >= MAX_MJPEG_RENEWALS:
+                            break
+
+                        renew_success = False
+                        while consecutive_failures < MAX_CONSECUTIVE_RENEW_FAILURES and not renew_success:
+                            if hasattr(self.coordinator, "async_wake_camera"):
+                                try:
+                                    await self.coordinator.async_wake_camera(self.device_id)
+                                except Exception as wake_err:
+                                    _LOGGER.debug("Error waking camera for renewal: %s", wake_err)
+
+                            if hasattr(self.coordinator, "async_wait_for_wake"):
+                                await self.coordinator.async_wait_for_wake(self.device_id, timeout=8.0)
+
+                            current_sessions = getattr(self.coordinator, "cloud_sip_sessions", {})
+                            new_session = current_sessions.get(str(self.device_id))
+                            if not new_session or new_session is session:
+                                consecutive_failures += 1
+                                if consecutive_failures >= MAX_CONSECUTIVE_RENEW_FAILURES:
+                                    break
+                                await asyncio.sleep(0.5)
+                                continue
+
+                            new_frame = await new_session.wait_for_first_frame(timeout=8.0)
+                            if new_frame is None:
+                                consecutive_failures += 1
+                                if consecutive_failures >= MAX_CONSECUTIVE_RENEW_FAILURES:
+                                    break
+                                await asyncio.sleep(0.5)
+                                continue
+
+                            renew_success = True
+                            consecutive_failures = 0
+                            renewals += 1
+                            session = new_session
+                            _LOGGER.debug("mjpeg session renewed after remote BYE n=%d", renewals)
+
                             p_header = (
                                 f"--frameboundary\r\n"
                                 f"Content-Type: image/jpeg\r\n"
@@ -164,15 +243,9 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                                     max_send_gap_ms = gap_ms
                             last_send_ts = now
 
-                        now = time.monotonic()
-                        if now - last_serve_log >= 5.0:
-                            _LOGGER.debug(
-                                "mjpeg serve frames=%d max_send_gap_ms=%.0f",
-                                served_frames,
-                                max_send_gap_ms,
-                            )
-                            last_serve_log = now
-                            max_send_gap_ms = 0.0
+                        if not renew_success:
+                            break
+
                     return response
                 except (ConnectionResetError, asyncio.CancelledError):
                     return response
