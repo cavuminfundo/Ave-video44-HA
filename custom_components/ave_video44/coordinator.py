@@ -296,10 +296,9 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 self.async_update_listeners()
                 return target_sip_uri
 
-            call_id = None
             if self.api:
                 try:
-                    call_id = await self.api.control_monitoring(
+                    await self.api.control_monitoring(
                         device_id,
                         monitoring_device_number=mon_num,
                         action=1,
@@ -437,8 +436,12 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self, device_id: int | str, monitoring_device_number: Optional[str] = None
     ) -> Optional[CloudSipMediaSession]:
         """Pre-emptively prepare a new CloudSipMediaSession before old session expires."""
+        t0 = time.monotonic()
         dev_str = str(device_id)
         if dev_str in self.user_hangup or not self.api:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            reason = "user_hangup" if dev_str in self.user_hangup else "no_api"
+            _LOGGER.warning("pre-renew failed stage=prepare_none elapsed_ms=%d reason=%s", elapsed_ms, reason)
             return None
 
         dev = next((d for d in self.devices if str(d.get("deviceId")) == dev_str), None)
@@ -457,6 +460,8 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                         break
 
         if not target_sip_uri:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _LOGGER.warning("pre-renew failed stage=prepare_none elapsed_ms=%d reason=no_target_sip_uri", elapsed_ms)
             return None
 
         mon_num = monitoring_device_number
@@ -470,6 +475,8 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         try:
             sip_acct = await self.api.get_sip_account(dev_str)
             if not (isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password")):
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                _LOGGER.warning("pre-renew failed stage=prepare_none elapsed_ms=%d reason=no_sip_account", elapsed_ms)
                 return None
 
             user_id = str(
@@ -498,10 +505,14 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             )
             started = await session.async_start()
             if not started:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                _LOGGER.warning("pre-renew failed stage=start_false elapsed_ms=%d reason=start_failed", elapsed_ms)
                 await session.async_stop()
                 return None
             return session
         except asyncio.CancelledError:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _LOGGER.warning("pre-renew failed stage=cancelled elapsed_ms=%d reason=cancelled", elapsed_ms)
             if session:
                 try:
                     await session.async_stop()
@@ -509,7 +520,8 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     pass
             raise
         except Exception as err:
-            _LOGGER.debug("Could not prepare CloudSipMediaSession: %s", err)
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _LOGGER.warning("pre-renew failed stage=exception elapsed_ms=%d reason=%s", elapsed_ms, type(err).__name__)
             if session:
                 try:
                     await session.async_stop()

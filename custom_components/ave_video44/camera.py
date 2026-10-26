@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_MJPEG_RENEWALS: int = 20
 MAX_CONSECUTIVE_RENEW_FAILURES: int = 3
-PRE_RENEW_AFTER_S: float = 24.0
+PRE_RENEW_AFTER_S: float = 16.0
 
 
 async def async_setup_entry(
@@ -101,17 +101,33 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
     async def _run_pre_renewal(self, device_id: str) -> tuple[Any, Optional[bytes]]:
         """Pre-emptively prepare a new SIP session and await its first frame."""
         new_sess = None
+        t0 = time.monotonic()
         try:
             if hasattr(self.coordinator, "async_prepare_renewal_session"):
                 new_sess = await self.coordinator.async_prepare_renewal_session(device_id)
             if not new_sess:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                _LOGGER.warning(
+                    "pre-renew failed stage=prepare_none elapsed_ms=%d reason=coordinator_none",
+                    elapsed_ms,
+                )
                 return None, None
             new_frame = await new_sess.wait_for_first_frame(timeout=8.0)
             if new_frame is None:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                _LOGGER.warning(
+                    "pre-renew failed stage=first_frame_timeout elapsed_ms=%d reason=first_frame_timeout",
+                    elapsed_ms,
+                )
                 await new_sess.async_stop()
                 return None, None
             return new_sess, new_frame
         except asyncio.CancelledError:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _LOGGER.warning(
+                "pre-renew failed stage=cancelled elapsed_ms=%d reason=cancelled",
+                elapsed_ms,
+            )
             if new_sess:
                 try:
                     await new_sess.async_stop()
@@ -119,7 +135,12 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                     pass
             raise
         except Exception as err:
-            _LOGGER.debug("Pre-renewal exception: %s", err)
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _LOGGER.warning(
+                "pre-renew failed stage=exception elapsed_ms=%d reason=%s",
+                elapsed_ms,
+                type(err).__name__,
+            )
             if new_sess:
                 try:
                     await new_sess.async_stop()

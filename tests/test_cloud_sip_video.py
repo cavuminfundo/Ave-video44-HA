@@ -1,13 +1,13 @@
 """Tests for Cloud SIP Media Session, H.264 SRTP decoding, and camera streaming."""
 
 import asyncio
-import os
-import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
+import logging
 import sys
+import time
 from types import ModuleType
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+import pytest
 
 # Ensure voluptuous stub is registered in sys.modules
 try:
@@ -24,7 +24,7 @@ except ImportError:
     vol_mod.Any = lambda *args: lambda val: val
     vol_mod.Coerce = lambda t: lambda val: val
     sys.modules.setdefault("voluptuous", vol_mod)
-    import voluptuous as vol
+    import voluptuous as vol  # noqa: F401
 
 # Ensure homeassistant stubs exist in sys.modules
 def _ensure_ha_stubs():
@@ -598,6 +598,7 @@ async def test_camera_handle_async_mjpeg_stream_boundary_and_chunks(mock_coordin
     with patch("aiohttp.web.StreamResponse", return_value=fake_response) as mock_stream_resp:
         request = MagicMock()
         resp = await cam.handle_async_mjpeg_stream(request)
+        assert resp is fake_response
 
         mock_coordinator.async_wait_for_wake.assert_called_with(dev_id, timeout=10.0)
         mock_stream_resp.assert_called_once()
@@ -917,7 +918,7 @@ async def test_coordinator_unlock_faster_cold_unlock(mock_coordinator):
     mock_coordinator.api.command_unlock = AsyncMock(return_value={"code": "0"})
     mock_coordinator.api.unlock = AsyncMock(return_value={"code": "0"})
 
-    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch("asyncio.sleep", new_callable=AsyncMock):
         await mock_coordinator.async_unlock(device_id=dev_id, lock_id="1")
 
         mock_coordinator.async_wake_camera.assert_called_once_with(dev_id, monitoring_device_number="1")
@@ -1015,7 +1016,7 @@ async def test_cloud_sip_ffmpeg_target_fps_and_command():
 
 @pytest.mark.asyncio
 async def test_camera_mjpeg_stream_pre_renew_swap_ok(mock_coordinator):
-    """Verify pre-emptive make-before-break renewal swaps session smoothly when age >= 24s."""
+    """Verify pre-emptive make-before-break renewal swaps session smoothly when age >= 16s."""
     from custom_components.ave_video44.camera import AveVideo44Camera
 
     dev_id = "9991"
@@ -1377,6 +1378,167 @@ async def test_cloud_sip_media_session_async_start_cancellation_cleanup(monkeypa
             await asyncio.wait_for(sess.async_start(), timeout=2.0)
 
         stop_mock.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_stall_watchdog_warning_and_cleanup(caplog, monkeypatch):
+    """Verify event loop stall watchdog detects stall, logs warning with stack, and stops cleanly."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    monkeypatch.setattr(CloudSipMediaSession, "_last_session_stop_ts", 0.0)
+
+    sess = CloudSipMediaSession(
+        device_id="9991",
+        sip_username="user",
+        sip_password="pwd",
+        target_sip_uri="sip:101@cloud",
+    )
+    sess.stall_threshold_s = 0.04
+
+    mock_reader = AsyncMock()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock()
+    mock_writer.drain = AsyncMock()
+    mock_writer.close = MagicMock()
+    mock_writer.wait_closed = AsyncMock()
+
+    sdp_200 = (
+        "v=0\r\n"
+        "c=IN IP4 51.144.180.20\r\n"
+        "m=audio 25000 RTP/SAVP 8\r\n"
+        "m=video 25002 RTP/SAVP 96\r\n"
+        "a=rtpmap:96 H264/90000\r\n"
+        "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:cmVtb3RldmlkZW9rZXkxMjM0NTY3ODkwMTIzNDU2\r\n"
+    )
+    sip_responses = [
+        ("SIP/2.0 200 OK", {"content-length": "0"}, ""),
+        ("SIP/2.0 200 OK", {"content-length": str(len(sdp_200)), "contact": "<sip:target@test.com>"}, sdp_200),
+    ]
+
+    async def _mock_read():
+        if sip_responses:
+            return sip_responses.pop(0)
+        await asyncio.sleep(1.0)
+        return "SIP/2.0 200 OK", {}, ""
+
+    sess._read_sip_msg = _mock_read
+    sess.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake\xff\xd9")
+
+    with patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)), \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         caplog.at_level(logging.DEBUG):
+        fake_proc = MagicMock()
+        fake_proc.stdout = AsyncMock()
+        fake_proc.stdout.read = AsyncMock(return_value=b"")
+        fake_proc.wait = AsyncMock()
+        fake_proc.terminate = MagicMock()
+        fake_proc.kill = MagicMock()
+        mock_exec.return_value = fake_proc
+
+        started = await asyncio.wait_for(sess.async_start(), timeout=2.0)
+        assert started is True
+        watchdog_thread = sess._stall_thread
+        assert watchdog_thread is not None
+        assert watchdog_thread.is_alive()
+
+        # Verify debug logging of safe response status lines
+        assert "SIP REGISTER response: SIP/2.0 200 OK" in caplog.text
+        assert "SIP INVITE response: SIP/2.0 200 OK" in caplog.text
+
+        # Simulate stuck heartbeat: update heartbeat to past
+        sess._loop_heartbeat_ts = time.monotonic() - 0.2
+        await asyncio.sleep(0.08)
+
+        assert "event loop stalled" in caplog.text
+        assert "main thread stack:" in caplog.text
+
+        # Clean stop - verify watchdog thread is terminated and cleaned up
+        await sess.async_stop()
+        assert sess._stall_thread is None
+        assert not watchdog_thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_prepare_renewal_failure_logging(caplog, mock_coordinator, monkeypatch):
+    """Verify coordinator pre-renew failure logging across stages."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    monkeypatch.setattr(CloudSipMediaSession, "_last_session_stop_ts", 0.0)
+
+    # 1. stage=prepare_none (user_hangup)
+    mock_coordinator.user_hangup.add("9991")
+    with caplog.at_level(logging.WARNING):
+        res = await mock_coordinator.async_prepare_renewal_session("9991")
+        assert res is None
+        assert "pre-renew failed stage=prepare_none" in caplog.text
+        assert "reason=user_hangup" in caplog.text
+
+    # 2. stage=start_false
+    mock_coordinator.user_hangup.clear()
+    mock_coordinator.devices = [{
+        "deviceId": "9991",
+        "deviceIntercomInfo": {"username": "sip:101@test"},
+    }]
+    mock_coordinator.api.get_sip_account = AsyncMock(return_value={"username": "u", "password": "p"})
+    with patch("custom_components.ave_video44.coordinator.CloudSipMediaSession") as mock_cls, \
+         caplog.at_level(logging.WARNING):
+        fake_sess = MagicMock()
+        fake_sess.async_start = AsyncMock(return_value=False)
+        fake_sess.async_stop = AsyncMock()
+        mock_cls.return_value = fake_sess
+        res = await mock_coordinator.async_prepare_renewal_session("9991")
+        assert res is None
+        assert "pre-renew failed stage=start_false" in caplog.text
+        assert "reason=start_failed" in caplog.text
+        fake_sess.async_stop.assert_called_once()
+
+    # 3. stage=exception
+    mock_coordinator.api.get_sip_account = AsyncMock(side_effect=RuntimeError("SIP connection dropped"))
+    with caplog.at_level(logging.WARNING):
+        res = await mock_coordinator.async_prepare_renewal_session("9991")
+        assert res is None
+        assert "pre-renew failed stage=exception" in caplog.text
+        assert "reason=RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_camera_pre_renewal_failure_logging(caplog, mock_coordinator):
+    """Verify camera pre-renew failure logging across stages."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+
+    dev_id = "9991"
+    cam = AveVideo44Camera(mock_coordinator, device_id=dev_id)
+
+    # 1. stage=first_frame_timeout
+    fake_sess = MagicMock()
+    fake_sess.wait_for_first_frame = AsyncMock(return_value=None)
+    fake_sess.async_stop = AsyncMock()
+    mock_coordinator.async_prepare_renewal_session = AsyncMock(return_value=fake_sess)
+
+    with caplog.at_level(logging.WARNING):
+        sess, frame = await cam._run_pre_renewal(dev_id)
+        assert sess is None
+        assert frame is None
+        assert "pre-renew failed stage=first_frame_timeout" in caplog.text
+        assert "reason=first_frame_timeout" in caplog.text
+        fake_sess.async_stop.assert_called_once()
+
+    # 2. stage=prepare_none
+    mock_coordinator.async_prepare_renewal_session = AsyncMock(return_value=None)
+    with caplog.at_level(logging.WARNING):
+        sess, frame = await cam._run_pre_renewal(dev_id)
+        assert sess is None
+        assert "pre-renew failed stage=prepare_none" in caplog.text
+        assert "reason=coordinator_none" in caplog.text
+
+    # 3. stage=exception
+    mock_coordinator.async_prepare_renewal_session = AsyncMock(side_effect=ValueError("invalid config"))
+    with caplog.at_level(logging.WARNING):
+        sess, frame = await cam._run_pre_renewal(dev_id)
+        assert sess is None
+        assert "pre-renew failed stage=exception" in caplog.text
+        assert "reason=ValueError" in caplog.text
+
 
 
 

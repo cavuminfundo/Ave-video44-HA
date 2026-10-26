@@ -16,6 +16,30 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.15 — 2026-10-26
+
+### 🇬🇧 English
+
+- **Early Pre-Renewal at 16s**:
+  - Shifted pre-renewal trigger from 24.0s to 16.0s (`PRE_RENEW_AFTER_S = 16.0`), initiating session preparation well before the ~26s event loop stall and ~32s cloud BYE.
+- **Structured Pre-Renewal Failure Diagnostics**:
+  - Added structured warning telemetry for pre-renewal failures across coordinator and camera with stages (`prepare_none`, `start_false`, `first_frame_timeout`, `cancelled`, `exception`), elapsed milliseconds, and failure reasons without exposing secrets.
+  - Added debug logging for incoming SIP REGISTER and INVITE response status lines and realm.
+- **Event Loop Stall Watchdog**:
+  - Added a per-session daemon watchdog thread in `CloudSipMediaSession` monitoring monotonic heartbeat timestamps updated every 50ms by the lag loop.
+  - Emits a warning with the event loop thread frame stack (up to 3 dumps per session, max 25 frames) when a stall >1.0s is detected, without touching asyncio objects.
+
+### 🇮🇹 Italiano
+
+- **Rinnovo Preventivo Anticipato a 16s**:
+  - Anticipato il trigger di pre-rinnovo da 24.0s a 16.0s (`PRE_RENEW_AFTER_S = 16.0`), avviando la preparazione della sessione prima del blocco dell'event loop a ~26s e del BYE cloud a ~32s.
+- **Diagnostica Strutturata dei Fallimenti di Pre-Rinnovo**:
+  - Aggiunta telemetria di warning strutturata per fallimenti del pre-rinnovo su coordinator e camera per i vari stati (`prepare_none`, `start_false`, `first_frame_timeout`, `cancelled`, `exception`), con millisecondi trascorsi e motivo dell'errore senza mostrare dati sensibili.
+  - Aggiunto log a livello debug di status line e realm per risposte SIP REGISTER e INVITE.
+- **Watchdog per Rallentamenti dell'Event Loop**:
+  - Introdotto un thread daemon per sessione in `CloudSipMediaSession` che controlla un timestamp monotonic di heartbeat aggiornato ogni 50ms dal loop di lag.
+  - Emette un warning con lo stack di frame del thread dell'event loop (massimo 3 dump per sessione, troncato a 25 frame) quando viene rilevato uno stallo >1.0s, senza interagire con oggetti asyncio.
+
 ## v1.2.14 — 2026-10-26
 
 ### 🇬🇧 English

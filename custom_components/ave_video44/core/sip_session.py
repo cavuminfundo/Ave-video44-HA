@@ -10,7 +10,10 @@ import os
 import re
 import socket
 import struct
+import sys
+import threading
 import time
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import uuid
 
@@ -356,6 +359,48 @@ class CloudSipMediaSession:
         self._reg_tag: Optional[str] = None
         self._contact_uri: Optional[str] = None
         self._route_headers: List[str] = []
+        self._stall_thread: Optional[threading.Thread] = None
+        self._stall_stop_event: Optional[threading.Event] = None
+        self._loop_heartbeat_ts: float = 0.0
+        self.stall_threshold_s: float = 1.0
+
+    @staticmethod
+    def _format_sip_rx_debug(msg_type: str, start_line: str, headers: Dict[str, str]) -> str:
+        """Format safe debug representation of SIP response containing only status and realm."""
+        auth_hdr = headers.get("www-authenticate") or headers.get("proxy-authenticate") or ""
+        match = re.search(r'realm=["\']?([^"\',]+)["\']?', auth_hdr)
+        realm = f" realm={match.group(1)}" if match else ""
+        return f"{msg_type} response: {start_line}{realm}"
+
+    def _run_stall_watchdog(self, loop_thread_id: int) -> None:
+        """Daemon thread monitoring event loop heartbeat for stalls."""
+        try:
+            dump_count = 0
+            stalled_logged = False
+            while self._stall_stop_event and not self._stall_stop_event.wait(min(0.25, max(0.01, self.stall_threshold_s / 2))):
+                now = time.monotonic()
+                hb = self._loop_heartbeat_ts
+                if hb <= 0:
+                    continue
+                stalled_s = now - hb
+                if stalled_s > self.stall_threshold_s:
+                    if not stalled_logged and dump_count < 3:
+                        stalled_logged = True
+                        dump_count += 1
+                        frames = sys._current_frames()
+                        frame = frames.get(loop_thread_id)
+                        if frame:
+                            stack_lines = traceback.format_stack(frame)
+                            if len(stack_lines) > 25:
+                                stack_lines = stack_lines[-25:]
+                            stack_str = "".join(stack_lines)
+                        else:
+                            stack_str = "<thread not found>\n"
+                        _LOGGER.warning("event loop stalled %.1fs, main thread stack:\n%s", stalled_s, stack_str)
+                else:
+                    stalled_logged = False
+        except Exception:
+            pass
 
     @property
     def last_rtp_ts(self) -> float:
@@ -709,6 +754,7 @@ class CloudSipMediaSession:
             while self.is_active:
                 t0 = time.monotonic()
                 await asyncio.sleep(0.05)
+                self._loop_heartbeat_ts = time.monotonic()
                 elapsed = time.monotonic() - t0
                 lag_ms = max(0.0, (elapsed - 0.05) * 1000.0)
                 if lag_ms > max_lag_ms:
@@ -909,6 +955,17 @@ class CloudSipMediaSession:
             await asyncio.sleep(cooldown_wait)
 
         try:
+            loop_thread_id = threading.get_ident()
+            self._loop_heartbeat_ts = time.monotonic()
+            self._stall_stop_event = threading.Event()
+            self._stall_thread = threading.Thread(
+                target=self._run_stall_watchdog,
+                args=(loop_thread_id,),
+                name=f"sip-stall-{self.device_id}",
+                daemon=True,
+            )
+            self._stall_thread.start()
+
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 s.connect((self._sip_domain, 5060))
@@ -954,6 +1011,7 @@ class CloudSipMediaSession:
 
                     start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=6.0)
                     status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                    _LOGGER.debug("%s", self._format_sip_rx_debug("SIP REGISTER", start_line, headers))
                     break
                 except asyncio.TimeoutError:
                     if reg_attempt == 0:
@@ -990,6 +1048,7 @@ class CloudSipMediaSession:
 
                 start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=6.0)
                 status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                _LOGGER.debug("%s", self._format_sip_rx_debug("SIP REGISTER auth", start_line, headers))
 
             if status_code != 200:
                 _LOGGER.warning("SIP REGISTER failed with status %s", start_line)
@@ -1013,6 +1072,7 @@ class CloudSipMediaSession:
 
             start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=8.0)
             status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+            _LOGGER.debug("%s", self._format_sip_rx_debug("SIP INVITE", start_line, headers))
 
             auth_val = None
             if status_code in (401, 407):
@@ -1054,6 +1114,7 @@ class CloudSipMediaSession:
                 await self._writer.drain()
                 start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=8.0)
                 status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                _LOGGER.debug("%s", self._format_sip_rx_debug("SIP INVITE auth", start_line, headers))
 
             deadline = time.monotonic() + 15.0
             last_invite_send_ts = time.monotonic()
@@ -1105,6 +1166,7 @@ class CloudSipMediaSession:
                         self._read_sip_msg(), timeout=rem_timeout
                     )
                     status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
+                    _LOGGER.debug("%s", self._format_sip_rx_debug("SIP INVITE loop", start_line, headers))
                 except asyncio.TimeoutError:
                     pass
 
@@ -1236,10 +1298,17 @@ class CloudSipMediaSession:
 
     async def async_stop(self) -> None:
         """Terminate SIP session, stop FFmpeg and relay tasks, remove temp SDP."""
-        had_opened = bool(self.is_active or self._writer or self._ffmpeg_proc)
+        had_opened = bool(self.is_active or self._writer or self._ffmpeg_proc or self._stall_thread)
         if not had_opened:
             return
         self.is_active = False
+
+        if self._stall_stop_event:
+            self._stall_stop_event.set()
+        if self._stall_thread and self._stall_thread.is_alive():
+            self._stall_thread.join(timeout=0.5)
+        self._stall_thread = None
+        self._stall_stop_event = None
 
         if self._writer and self._contact_uri and self._call_id:
             try:
