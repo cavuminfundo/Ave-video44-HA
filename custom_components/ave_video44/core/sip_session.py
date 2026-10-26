@@ -1166,7 +1166,7 @@ class CloudSipMediaSession:
                 parsed_sdp.get("audio_payload_type"),
             )
 
-            self._sdp_path = f"/tmp/ave_video44_{self.device_id}.sdp"
+            self._sdp_path = f"/tmp/ave_video44_{self.device_id}_{uuid.uuid4().hex[:6]}.sdp"
             sdp_content = self._generate_local_sdp(
                 ffmpeg_port=self._ffmpeg_port,
                 crypto_suite=parsed_sdp["crypto_suite"],
@@ -1226,6 +1226,9 @@ class CloudSipMediaSession:
 
             await self.wait_for_first_frame(timeout=2.5)
             return True
+        except asyncio.CancelledError:
+            await asyncio.shield(self.async_stop())
+            raise
         except Exception as err:
             _LOGGER.error("Failed to start CloudSipMediaSession: %s", err, exc_info=True)
             await self.async_stop()
@@ -1252,7 +1255,7 @@ class CloudSipMediaSession:
                 bye_lines.extend(["Content-Length: 0", "", ""])
                 self._writer.write("\r\n".join(bye_lines).encode("utf-8"))
                 await self._writer.drain()
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 pass
 
         if self._sip_rx_task:
@@ -1267,7 +1270,7 @@ class CloudSipMediaSession:
             try:
                 self._ffmpeg_proc.terminate()
                 await asyncio.wait_for(self._ffmpeg_proc.wait(), timeout=1.5)
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 try:
                     self._ffmpeg_proc.kill()
                 except Exception:
@@ -1278,7 +1281,7 @@ class CloudSipMediaSession:
             try:
                 self._writer.close()
                 await self._writer.wait_closed()
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 pass
             self._writer = None
         self._reader = None
@@ -1301,7 +1304,10 @@ class CloudSipMediaSession:
                     except Exception:
                         pass
 
-            await asyncio.to_thread(_remove_sdp_file, self._sdp_path)
+            try:
+                await asyncio.to_thread(_remove_sdp_file, self._sdp_path)
+            except (Exception, asyncio.CancelledError):
+                _remove_sdp_file(self._sdp_path)
             self._sdp_path = None
 
         self._rx_buf.clear()

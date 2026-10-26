@@ -16,6 +16,26 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.14 — 2026-10-26
+
+### 🇬🇧 English
+
+- **Pre-emptive Make-Before-Break Video Session Renewal & Zero Video Freeze**:
+  - Pre-emptive background renewal: when an active Cloud SIP session reaches 24 seconds (`PRE_RENEW_AFTER_S = 24.0`), a new media session is prepared in the background before cloud BYE (~32s) and smoothly swapped on first frame received, completely eliminating the 20-30s frozen video gap.
+  - Unique per-session SDP path: appends a random hex identifier to `/tmp/ave_video44_{device_id}_{uuid}.sdp` preventing filesystem collision and file deletion between overlapping FFmpeg sessions.
+  - Unexpected ~8s hangup prevention: `async_commit_session` stops the old session directly without triggering user hangup or cloud monitoring cancellation (`action=3`); `is_stale` recognizes remote BYE immediately without 8s delay, and `get_active_sip_session` avoids tear-down during session swap.
+  - Post-BYE fallback: preserves post-BYE renewal loop if remote BYE arrives prematurely before pre-renewal is ready.
+  - Cancellation cleanup: ensured immediate stop and cleanup of renewal sessions upon task cancellation or early client disconnect.
+
+### 🇮🇹 Italiano
+
+- **Rinnovo Preventivo Make-Before-Break della Sessione Video e Zero Freeze Video**:
+  - Rinnovo preventivo in background: quando una sessione Cloud SIP attiva raggiunge i 24 secondi (`PRE_RENEW_AFTER_S = 24.0`), una nuova sessione viene preparata in background prima del BYE del cloud (~32s) e scambiata istantaneamente all'arrivo del primo fotogramma, eliminando il blocco video di 20-30s.
+  - Path SDP univoco per sessione: aggiunge un identificativo esadecimale a `/tmp/ave_video44_{device_id}_{uuid}.sdp` prevenendo collisioni sul filesystem e cancellazioni premature tra sessioni FFmpeg parallele.
+  - Prevenzione hangup inatteso a ~8s: `async_commit_session` ferma la vecchia sessione direttamente senza impostare l'hangup utente né inviare `action=3` al cloud; `is_stale` riconosce immediatamente il BYE remoto senza attendere 8s, e `get_active_sip_session` non chiude la chiamata durante il passaggio di sessione.
+  - Fallback post-BYE: mantiene il meccanismo di recupero post-BYE se il BYE del cloud arriva prima che la nuova sessione sia pronta.
+  - Pulizia su cancellazione: garantito arresto immediato e pulizia delle sessioni di rinnovo in caso di cancellazione del task o disconnessione anticipata del client.
+
 ## v1.2.13 — 2026-10-26
 
 ### 🇬🇧 English

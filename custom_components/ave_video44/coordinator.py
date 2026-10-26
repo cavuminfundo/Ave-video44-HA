@@ -229,7 +229,9 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                         now = time.monotonic()
                         last_rtp = getattr(existing, "last_rtp_ts", 0.0)
                         last_rtp_val = float(last_rtp) if isinstance(last_rtp, (int, float)) else 0.0
-                        is_stale = existing.is_active and last_rtp_val > 0 and (now - last_rtp_val) >= 8.0
+                        is_stale = getattr(existing, "remote_bye", False) or (
+                            existing.is_active and last_rtp_val > 0 and (now - last_rtp_val) >= 8.0
+                        )
                         if existing.is_active and not is_stale:
                             self.notify_frame_read(dev_str)
                             self.active_rtsp_url = None
@@ -384,7 +386,8 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 now - last_rtp_val,
             )
             sess.is_active = False
-            asyncio.create_task(self.async_hangup_call(dev_str))
+            if self.cloud_sip_sessions.get(dev_str) is sess:
+                asyncio.create_task(self.async_hangup_call(dev_str))
             return None
         return sess
 
@@ -429,6 +432,127 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             self.notify_frame_read(device_id)
             return await session.wait_for_first_frame(timeout=timeout)
         return None
+
+    async def async_prepare_renewal_session(
+        self, device_id: int | str, monitoring_device_number: Optional[str] = None
+    ) -> Optional[CloudSipMediaSession]:
+        """Pre-emptively prepare a new CloudSipMediaSession before old session expires."""
+        dev_str = str(device_id)
+        if dev_str in self.user_hangup or not self.api:
+            return None
+
+        dev = next((d for d in self.devices if str(d.get("deviceId")) == dev_str), None)
+        intercom_info = dev.get("deviceIntercomInfo") if dev else None
+        target_sip_uri = None
+        if isinstance(intercom_info, dict):
+            u = intercom_info.get("username", "")
+            if str(u).startswith("sip:"):
+                target_sip_uri = str(u)
+        elif isinstance(intercom_info, list) and intercom_info:
+            for item in intercom_info:
+                if isinstance(item, dict):
+                    u = item.get("username", "")
+                    if str(u).startswith("sip:"):
+                        target_sip_uri = str(u)
+                        break
+
+        if not target_sip_uri:
+            return None
+
+        mon_num = monitoring_device_number
+        if not mon_num:
+            if dev and isinstance(dev.get("extraConfig"), dict):
+                mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
+            else:
+                mon_num = "1"
+
+        session = None
+        try:
+            sip_acct = await self.api.get_sip_account(dev_str)
+            if not (isinstance(sip_acct, dict) and sip_acct.get("username") and sip_acct.get("password")):
+                return None
+
+            user_id = str(
+                (dev.get("userId") if dev else None)
+                or (dev.get("createUser") if dev else None)
+                or (self.entry.data.get("user_id") if getattr(self, "entry", None) and getattr(self.entry, "data", None) else None)
+                or "34964"
+            )
+            ffmpeg_bin = "ffmpeg"
+            try:
+                from homeassistant.components.ffmpeg import DATA_FFMPEG
+                if hasattr(self, "hass") and self.hass and DATA_FFMPEG in self.hass.data:
+                    ffmpeg_bin = getattr(self.hass.data[DATA_FFMPEG], "binary", "ffmpeg")
+            except Exception:
+                pass
+
+            session = CloudSipMediaSession(
+                device_id=dev_str,
+                sip_username=str(sip_acct["username"]),
+                sip_password=str(sip_acct["password"]),
+                target_sip_uri=target_sip_uri,
+                user_id=user_id,
+                target_device_num=str(mon_num or "1"),
+                sender_name="Citofono",
+                ffmpeg_binary=ffmpeg_bin,
+            )
+            started = await session.async_start()
+            if not started:
+                await session.async_stop()
+                return None
+            return session
+        except asyncio.CancelledError:
+            if session:
+                try:
+                    await session.async_stop()
+                except Exception:
+                    pass
+            raise
+        except Exception as err:
+            _LOGGER.debug("Could not prepare CloudSipMediaSession: %s", err)
+            if session:
+                try:
+                    await session.async_stop()
+                except Exception:
+                    pass
+            return None
+
+    async def async_commit_session(
+        self, device_id: int | str, new_session: CloudSipMediaSession
+    ) -> Optional[CloudSipMediaSession]:
+        """Commit new pre-renewed session, replacing active session and stopping old one."""
+        dev_str = str(device_id)
+        if dev_str in self.user_hangup:
+            try:
+                await new_session.async_stop()
+            except Exception:
+                pass
+            return None
+
+        old_sess = self.cloud_sip_sessions.get(dev_str)
+        self.cloud_sip_sessions[dev_str] = new_session
+        self.notify_frame_read(dev_str)
+
+        old_task = self._watchdog_tasks.pop(dev_str, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        self._watchdog_tasks[dev_str] = asyncio.create_task(
+            self._session_watchdog(dev_str, new_session)
+        )
+
+        self.active_rtsp_url = None
+        self.active_device_id = dev_str
+        self.call_state = "monitoring"
+        self.async_update_listeners()
+
+        if old_sess and old_sess is not new_session:
+            try:
+                await old_sess.async_stop()
+            except Exception as err:
+                _LOGGER.debug("Error stopping old session on commit: %s", err)
+
+        return old_sess
 
     async def async_hangup_call(self, device_id: int | str) -> None:
         """Terminate active call or monitoring session."""
