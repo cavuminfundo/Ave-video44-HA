@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ave_video44"
-version = "1.2.10"
+version = "1.2.11"
 description = "Home Assistant custom component for AVE Video V44 / GVS Intercom"
 authors = [{ name = "Federico" }]
 license = "MIT"

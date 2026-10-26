@@ -336,6 +336,8 @@ class CloudSipMediaSession:
         self.is_active: bool = False
         self._mjpeg_last_log: float = 0.0
         self._mjpeg_last_seq: int = 0
+        self._mjpeg_last_frame_ts: float = 0.0
+        self._mjpeg_gaps: List[float] = []
 
         self._mjpeg_buf = bytearray()
         self._rx_buf = bytearray()
@@ -592,15 +594,35 @@ class CloudSipMediaSession:
             self._frame_event.set()
 
             now = time.monotonic()
+            if self._mjpeg_last_frame_ts > 0.0:
+                gap_ms = (now - self._mjpeg_last_frame_ts) * 1000.0
+                self._mjpeg_gaps.append(gap_ms)
+            self._mjpeg_last_frame_ts = now
+
             if self._mjpeg_last_log == 0.0:
                 self._mjpeg_last_log = now
                 self._mjpeg_last_seq = self.frame_seq
             elif now - self._mjpeg_last_log >= 5.0:
                 elapsed = now - self._mjpeg_last_log
                 fps = (self.frame_seq - self._mjpeg_last_seq) / elapsed if elapsed > 0 else 0.0
-                _LOGGER.debug("mjpeg frames=%d fps=%.1f", self.frame_seq, fps)
+                if self._mjpeg_gaps:
+                    sorted_gaps = sorted(self._mjpeg_gaps)
+                    max_gap_ms = sorted_gaps[-1]
+                    p95_idx = int(0.95 * (len(sorted_gaps) - 1))
+                    p95_gap_ms = sorted_gaps[p95_idx]
+                else:
+                    max_gap_ms = 0.0
+                    p95_gap_ms = 0.0
+                _LOGGER.debug(
+                    "mjpeg frames=%d fps=%.1f max_gap_ms=%.0f p95_gap_ms=%.0f",
+                    self.frame_seq,
+                    fps,
+                    max_gap_ms,
+                    p95_gap_ms,
+                )
                 self._mjpeg_last_log = now
                 self._mjpeg_last_seq = self.frame_seq
+                self._mjpeg_gaps.clear()
 
     async def wait_for_first_frame(self, timeout: float = 6.0) -> Optional[bytes]:
         """Wait until the first JPEG frame is decoded."""
@@ -681,6 +703,10 @@ class CloudSipMediaSession:
         last_punch = 0.0
         video_rx_pkts = 0
         video_rx_bytes = 0
+        video_src_frames = 0
+        last_src_frames = 0
+        last_video_pkt_ts = 0.0
+        max_pkt_gap_ms = 0.0
         audio_rx_pkts = 0
         last_stats_log = time.monotonic()
         while self.is_active:
@@ -710,7 +736,17 @@ class CloudSipMediaSession:
                         had_pkts = True
                         video_rx_pkts += 1
                         video_rx_bytes += len(pkt)
-                        self._last_rtp_ts = time.monotonic()
+                        pkt_ts = time.monotonic()
+                        if last_video_pkt_ts > 0.0:
+                            gap_ms = (pkt_ts - last_video_pkt_ts) * 1000.0
+                            if gap_ms > max_pkt_gap_ms:
+                                max_pkt_gap_ms = gap_ms
+                        last_video_pkt_ts = pkt_ts
+
+                        if len(pkt) >= 2 and (pkt[1] & 0x80):
+                            video_src_frames += 1
+
+                        self._last_rtp_ts = pkt_ts
                         if self._ffmpeg_port:
                             self._video_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_port))
             except (BlockingIOError, InterruptedError):
@@ -730,9 +766,15 @@ class CloudSipMediaSession:
                 pass
 
             if now - last_stats_log >= 5.0:
-                last_stats_log = now
+                elapsed = now - last_stats_log
+                src_fps = (video_src_frames - last_src_frames) / elapsed if elapsed > 0 else 0.0
                 _LOGGER.debug("video rx pkts=%d bytes=%d", video_rx_pkts, video_rx_bytes)
+                _LOGGER.debug("video src frames=%d src_fps=%.1f", video_src_frames, src_fps)
+                _LOGGER.debug("video max_pkt_gap_ms=%.0f", max_pkt_gap_ms)
                 _LOGGER.debug("audio rx pkts=%d", audio_rx_pkts)
+                last_stats_log = now
+                last_src_frames = video_src_frames
+                max_pkt_gap_ms = 0.0
 
             if had_pkts:
                 await asyncio.sleep(0)
@@ -1082,7 +1124,7 @@ class CloudSipMediaSession:
 
             await asyncio.to_thread(_write_sdp_file, self._sdp_path, sdp_content)
 
-            self._ffmpeg_proc = await asyncio.create_subprocess_exec(
+            ffmpeg_cmd = [
                 self.ffmpeg_binary,
                 "-loglevel", "error",
                 "-fflags", "nobuffer",
@@ -1094,6 +1136,15 @@ class CloudSipMediaSession:
                 "-vcodec", "mjpeg",
                 "-q:v", "6",
                 "-",
+            ]
+            safe_cmd = [
+                "[REDACTED]" if any(k in arg.lower() for k in ("password", "token", "inline:", "secret", "key=")) else arg
+                for arg in ffmpeg_cmd
+            ]
+            _LOGGER.debug("FFmpeg spawn command: %s", " ".join(safe_cmd))
+
+            self._ffmpeg_proc = await asyncio.create_subprocess_exec(
+                *ffmpeg_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )

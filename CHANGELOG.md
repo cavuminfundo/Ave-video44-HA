@@ -16,6 +16,24 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.11 — 2026-10-26
+
+### 🇬🇧 English
+
+- **Video Diagnostic Telemetry & Jitter Analysis**:
+  - Source frame rate monitoring: tracks incoming RTP packets and counts video frames using RTP marker bit (`0x80`), logging `src_fps` and `max_pkt_gap_ms` every 5 seconds.
+  - FFmpeg MJPEG gap tracking: measures inter-frame delivery intervals, calculating maximum and 95th-percentile gaps (`max_gap_ms`, `p95_gap_ms`) to detect decoder stuttering.
+  - MJPEG streaming telemetry: tracks served frames to HTTP clients and inter-write send intervals (`max_send_gap_ms`) including network write/drain await latency in `camera.py`.
+  - FFmpeg command logging: logs sanitized FFmpeg spawn command line at debug level.
+
+### 🇮🇹 Italiano
+
+- **Telemetria Diagnostica Frame Video e Analisi Jitter**:
+  - Monitoraggio frame rate sorgente: analizza i pacchetti RTP in ingresso rilevando i frame video tramite RTP marker bit (`0x80`), registrando `src_fps` e `max_pkt_gap_ms` ogni 5 secondi.
+  - Tracciamento intervalli MJPEG FFmpeg: calcola l'intervallo tra fotogrammi consecutivi estratti da FFmpeg con valori massimo e 95° percentile (`max_gap_ms`, `p95_gap_ms`) per diagnosticare scatti e jitter nel decoder.
+  - Telemetria streaming MJPEG: traccia i frame inviati ai client HTTP e l'intervallo massimo tra scritture consecutive (`max_send_gap_ms`), includendo la latenza di await di write/drain in `camera.py`.
+  - Log comando FFmpeg: registra a livello debug la riga di comando sanitizzata di avvio processo FFmpeg.
+
 ## v1.2.10 — 2026-10-26
 
 ### 🇬🇧 English

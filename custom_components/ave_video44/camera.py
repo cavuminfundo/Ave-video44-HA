@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Any
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
@@ -126,6 +127,15 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                     ).encode("utf-8")
                     part = header + frame + b"\r\n"
                     await response.write(part)
+                    drain_fn = getattr(response, "drain", None)
+                    if callable(drain_fn):
+                        drain_res = drain_fn()
+                        if asyncio.iscoroutine(drain_res):
+                            await drain_res
+                    served_frames = 1
+                    last_send_ts = time.monotonic()
+                    last_serve_log = last_send_ts
+                    max_send_gap_ms = 0.0
 
                     last_seq = session.frame_seq
                     while session.is_active:
@@ -141,6 +151,28 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                             ).encode("utf-8")
                             p = p_header + new_frame + b"\r\n"
                             await response.write(p)
+                            drain_fn = getattr(response, "drain", None)
+                            if callable(drain_fn):
+                                drain_res = drain_fn()
+                                if asyncio.iscoroutine(drain_res):
+                                    await drain_res
+                            served_frames += 1
+                            now = time.monotonic()
+                            if last_send_ts > 0.0:
+                                gap_ms = (now - last_send_ts) * 1000.0
+                                if gap_ms > max_send_gap_ms:
+                                    max_send_gap_ms = gap_ms
+                            last_send_ts = now
+
+                        now = time.monotonic()
+                        if now - last_serve_log >= 5.0:
+                            _LOGGER.debug(
+                                "mjpeg serve frames=%d max_send_gap_ms=%.0f",
+                                served_frames,
+                                max_send_gap_ms,
+                            )
+                            last_serve_log = now
+                            max_send_gap_ms = 0.0
                     return response
                 except (ConnectionResetError, asyncio.CancelledError):
                     return response
