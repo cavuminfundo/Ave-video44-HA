@@ -4,8 +4,10 @@ import asyncio
 import base64
 import collections
 import hashlib
+import hmac
 import json
 import logging
+import math
 import os
 import re
 import socket
@@ -17,13 +19,21 @@ import traceback
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import uuid
 
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
 from ..const import (
     AUDIO_PORT,
     DEV_DOORSTATION,
     DEV_INDOORPHONE,
     DEV_UNKONW,
 )
-from .protocol import alaw_to_pcm16, pcm16_to_alaw
+from .protocol import (
+    alaw_to_pcm16,
+    pcm16_to_alaw,
+    pcm16_to_ulaw,
+    ulaw_to_pcm16,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,7 +115,7 @@ class AveSipSession(asyncio.DatagramProtocol):
                 self._transport.sendto(rtp_header + alaw, self._remote_rtp_addr)
                 self._tx_sent_count += 1
             except Exception as err:
-                _LOGGER.error("Failed to send RTP datagram: %s", err)
+                _LOGGER.debug("Failed to send RTP datagram: %s", err)
 
         now = time.monotonic()
         if self._tx_last_log_time == 0.0:
@@ -306,6 +316,7 @@ class CloudSipMediaSession:
         sender_name: str = "Citofono",
         ffmpeg_binary: str = "ffmpeg",
         on_terminated: Optional[Callable[[], None]] = None,
+        enable_audio: bool = True,
     ) -> None:
         self.device_id = str(device_id)
         self.sip_username = str(sip_username)
@@ -316,6 +327,7 @@ class CloudSipMediaSession:
         self.sender_name = str(sender_name)
         self.ffmpeg_binary = ffmpeg_binary
         self.on_terminated = on_terminated
+        self.enable_audio: bool = enable_audio
 
         # Extract user & domain, e.g. "sip:2114136144349364224@eu.open-sips.gvs-icloud.com"
         clean = self.sip_username
@@ -352,6 +364,27 @@ class CloudSipMediaSession:
         self._rtcp_sock: Optional[socket.socket] = None
         self._ffmpeg_port: Optional[int] = None
         self._ffmpeg_proc: Optional[asyncio.subprocess.Process] = None
+        self._ffmpeg_audio_port: Optional[int] = None
+        self._ffmpeg_audio_proc: Optional[asyncio.subprocess.Process] = None
+        self._audio_sdp_path: Optional[str] = None
+        self._rx_pcm16_callbacks: Set[Callable[[bytes], None]] = set()
+        self._audio_rx_pkts: int = 0
+        self._audio_rx_bytes: int = 0
+        self._audio_rx_last_log_ts: float = 0.0
+        self._audio_rx_rms_samples: List[float] = []
+        self._remote_ip: Optional[str] = None
+        self._remote_audio_port: Optional[int] = None
+        self._audio_payload_type: int = 0
+        self._srtp_tx_audio_key: Optional[bytes] = None
+        self._tx_seq: int = 0
+        self._tx_timestamp: int = 0
+        self._tx_ssrc: int = 0x12345678
+        self._tx_audio_queue: collections.deque = collections.deque(maxlen=10)
+        self._audio_tx_last_log_ts: float = 0.0
+        self._audio_tx_pkts: int = 0
+        self._audio_tx_bytes: int = 0
+        self._audio_tx_rms_samples: List[float] = []
+        self._ffmpeg_audio_task: Optional[asyncio.Task] = None
         self._tasks: List[asyncio.Task] = []
         self._sip_rx_task: Optional[asyncio.Task] = None
         self._local_ip: str = "127.0.0.1"
@@ -365,6 +398,117 @@ class CloudSipMediaSession:
         self._stall_stop_event: Optional[threading.Event] = None
         self._loop_heartbeat_ts: float = 0.0
         self.stall_threshold_s: float = 1.0
+
+    def add_rx_pcm16_callback(self, callback: Callable[[bytes], None]) -> None:
+        """Register incoming decoded PCM16 audio frame callback."""
+        self._rx_pcm16_callbacks.add(callback)
+
+    def remove_rx_pcm16_callback(self, callback: Callable[[bytes], None]) -> None:
+        """Unregister incoming decoded PCM16 audio frame callback."""
+        self._rx_pcm16_callbacks.discard(callback)
+
+    @staticmethod
+    def compute_pcm16_rms_dbfs(frame: bytes) -> float:
+        """Calculate Root Mean Square level in dBFS from 16-bit linear PCM."""
+        if not frame or len(frame) < 2:
+            return -96.0
+        num_samples = len(frame) // 2
+        samples = struct.unpack(f"<{num_samples}h", frame[: num_samples * 2])
+        sum_sq = sum(s * s for s in samples)
+        mean_sq = sum_sq / num_samples
+        if mean_sq <= 0:
+            return -96.0
+        rms = math.sqrt(mean_sq)
+        dbfs = 20.0 * math.log10(max(1.0, rms) / 32767.0)
+        return max(-96.0, min(0.0, dbfs))
+
+    @staticmethod
+    def _encrypt_srtp_packet(
+        rtp_pkt: bytes, srtp_raw_key: bytes, ssrc: int, seq: int, roc: int = 0
+    ) -> bytes:
+        """Encrypt RTP packet with AES-CTR and HMAC-SHA1-80 auth tag (RFC 3711)."""
+        master_key = srtp_raw_key[:16]
+        master_salt = srtp_raw_key[16:30]
+        rtp_header = rtp_pkt[:12]
+        payload = rtp_pkt[12:]
+
+        packet_index = (roc << 16) | (seq & 0xFFFF)
+        salt_int = int.from_bytes(master_salt, "big")
+        iv_int = (salt_int << 16) ^ ((ssrc & 0xFFFFFFFF) << 64) ^ (packet_index << 16)
+        iv = iv_int.to_bytes(16, "big")
+
+        cipher = Cipher(algorithms.AES(master_key), modes.CTR(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(payload) + encryptor.finalize()
+
+        auth_data = rtp_header + ciphertext + struct.pack("!I", roc)
+        auth_tag = hmac.new(master_key, auth_data, hashlib.sha1).digest()[:10]
+        return rtp_header + ciphertext + auth_tag
+
+    def send_pcm16_frame(self, frame: bytes) -> None:
+        """Encode PCM16 audio frame to G.711, encrypt with SRTP, and transmit via UDP."""
+        if not self.enable_audio:
+            return
+
+        rms_dbfs = self.compute_pcm16_rms_dbfs(frame)
+        self._audio_tx_rms_samples.append(rms_dbfs)
+        self._tx_audio_queue.append(frame)
+
+        if not self.is_active or not self._audio_sock:
+            return
+
+        if self._audio_payload_type == 8:
+            payload = pcm16_to_alaw(frame)
+            pt = 8
+        else:
+            payload = pcm16_to_ulaw(frame)
+            pt = 0
+
+        rtp_header = struct.pack(
+            "!BBHII",
+            0x80,
+            pt,
+            self._tx_seq & 0xFFFF,
+            self._tx_timestamp & 0xFFFFFFFF,
+            self._tx_ssrc & 0xFFFFFFFF,
+        )
+        rtp_pkt = rtp_header + payload
+
+        if self._srtp_tx_audio_key and len(self._srtp_tx_audio_key) >= 30:
+            out_pkt = self._encrypt_srtp_packet(
+                rtp_pkt,
+                self._srtp_tx_audio_key,
+                ssrc=self._tx_ssrc,
+                seq=self._tx_seq,
+                roc=0,
+            )
+        else:
+            out_pkt = rtp_pkt
+
+        if self._remote_ip and self._remote_audio_port:
+            try:
+                self._audio_sock.sendto(out_pkt, (self._remote_ip, self._remote_audio_port))
+                self._audio_tx_pkts += 1
+                self._audio_tx_bytes += len(out_pkt)
+            except (BlockingIOError, InterruptedError):
+                pass
+            except Exception as err:
+                _LOGGER.debug("Audio TX sendto error: %s", err)
+
+        self._tx_seq = (self._tx_seq + 1) & 0xFFFF
+        self._tx_timestamp = (self._tx_timestamp + len(payload)) & 0xFFFFFFFF
+
+        now = time.monotonic()
+        if self._audio_tx_last_log_ts == 0.0:
+            self._audio_tx_last_log_ts = now
+        elif now - self._audio_tx_last_log_ts >= 5.0:
+            self._audio_tx_last_log_ts = now
+            _LOGGER.debug(
+                "audio tx pkts=%d bytes=%d queue=%d",
+                self._audio_tx_pkts,
+                self._audio_tx_bytes,
+                len(self._tx_audio_queue),
+            )
 
     @staticmethod
     def _format_sip_rx_debug(msg_type: str, start_line: str, headers: Dict[str, str]) -> str:
@@ -466,6 +610,8 @@ class CloudSipMediaSession:
             "crypto_suite": "AES_CM_128_HMAC_SHA1_80",
             "crypto_key": "",
             "video_fmtp": "",
+            "callee_audio_suite": "AES_CM_128_HMAC_SHA1_80",
+            "callee_audio_key": "",
         }
         current_media = ""
         for line in sdp_text.splitlines():
@@ -485,6 +631,13 @@ class CloudSipMediaSession:
                 rtp_parts = line.split("a=rtpmap:", 1)[1].strip().split()
                 if rtp_parts and not res.get("audio_payload_type"):
                     res["audio_payload_type"] = rtp_parts[0]
+            elif line.startswith("a=crypto:") and current_media == "audio":
+                parts = line.split()
+                if len(parts) >= 3:
+                    res["callee_audio_suite"] = parts[1]
+                    for p in parts[2:]:
+                        if p.startswith("inline:"):
+                            res["callee_audio_key"] = p.split("inline:")[1].split("|")[0].strip()
             elif line.startswith("m=video "):
                 current_media = "video"
                 parts = line.split()
@@ -500,6 +653,8 @@ class CloudSipMediaSession:
             elif line.startswith("a=fmtp:96 ") and current_media == "video":
                 res["video_fmtp"] = line.split("a=fmtp:96 ")[1].strip()
 
+        if not res.get("audio_payload_type"):
+            res["audio_payload_type"] = "0"
         res["callee_video_suite"] = res["crypto_suite"]
         res["callee_video_key"] = res["crypto_key"]
         return res
@@ -521,6 +676,60 @@ class CloudSipMediaSession:
             "",
         ]
         return "\r\n".join(lines)
+
+    def _generate_audio_sdp(
+        self,
+        ffmpeg_audio_port: int,
+        crypto_suite: str,
+        crypto_key: str,
+        payload_type: Any = 0,
+    ) -> str:
+        """Generate SDP descriptor file for local FFmpeg audio listener."""
+        pt = str(payload_type) if payload_type is not None else "0"
+        codec_name = "PCMA" if pt == "8" else "PCMU"
+        lines = [
+            "v=0",
+            "o=- 0 0 IN IP4 127.0.0.1",
+            "s=AVE Audio",
+            "c=IN IP4 127.0.0.1",
+            "t=0 0",
+            f"m=audio {ffmpeg_audio_port} RTP/SAVP {pt}",
+            f"a=rtpmap:{pt} {codec_name}/8000",
+            f"a=crypto:1 {crypto_suite} inline:{crypto_key}",
+            "",
+        ]
+        return "\r\n".join(lines)
+
+    @staticmethod
+    def _write_sdp_sync(path: str, content: str) -> None:
+        """Synchronously write SDP descriptor file with 0o600 permissions."""
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        mode = 0o600
+        fd = os.open(path, flags, mode)
+        try:
+            try:
+                os.fchmod(fd, mode)
+            except Exception:
+                pass
+            with open(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception:
+            pass
+
+    async def _async_write_sdp_file(self, path: str, content: str) -> None:
+        """Write SDP descriptor file asynchronously with 0o600 permissions."""
+        await asyncio.to_thread(self._write_sdp_sync, path, content)
+
+    async def _async_remove_sdp_file(self, path: str) -> None:
+        """Remove temporary SDP descriptor file asynchronously."""
+        def _remove() -> None:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+
+        await asyncio.to_thread(_remove)
 
     def build_register_packet(self, cseq: int = 1, auth: Optional[str] = None) -> str:
         """Build SIP REGISTER packet."""
@@ -740,6 +949,99 @@ class CloudSipMediaSession:
         except (asyncio.CancelledError, Exception):
             pass
 
+    def _process_inbound_audio_socket(self) -> bool:
+        """Process inbound packets on audio socket with loopback isolation."""
+        if not self._audio_sock:
+            return False
+        had_pkts = False
+        try:
+            while True:
+                pkt, _ = self._audio_sock.recvfrom(65535)
+                if pkt:
+                    had_pkts = True
+                    self._audio_rx_pkts += 1
+                    self._audio_rx_bytes += len(pkt)
+                    if self._ffmpeg_audio_port:
+                        try:
+                            self._audio_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_audio_port))
+                        except OSError as relay_err:
+                            _LOGGER.debug("Audio relay loopback send error: %s", relay_err)
+        except (BlockingIOError, InterruptedError):
+            pass
+        except Exception as err:
+            _LOGGER.debug("Audio recvfrom error: %s", err)
+        return had_pkts
+
+    async def _start_ffmpeg_audio_subprocess(self, sdp_path: str) -> None:
+        """Spawn FFmpeg process to receive SRTP audio and decode to linear PCM16."""
+        if not self.enable_audio:
+            return
+        audio_cmd = [
+            self.ffmpeg_binary,
+            "-nostats",
+            "-loglevel", "warning",
+            "-protocol_whitelist", "file,udp,rtp,srtp,crypto",
+            "-i", sdp_path,
+            "-f", "s16le",
+            "-acodec", "pcm_s16le",
+            "-ac", "1",
+            "-ar", "8000",
+            "pipe:1",
+        ]
+        self._ffmpeg_audio_proc = await asyncio.create_subprocess_exec(
+            *audio_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+
+    async def _ffmpeg_audio_stdout_loop(self) -> None:
+        """Read exact 320-byte PCM16 chunks from FFmpeg stdout and dispatch to callbacks."""
+        proc = self._ffmpeg_audio_proc
+        if not proc or not proc.stdout:
+            return
+        try:
+            while self.is_active and proc.stdout:
+                try:
+                    chunk = await proc.stdout.readexactly(320)
+                except (asyncio.IncompleteReadError, asyncio.CancelledError):
+                    break
+                if not isinstance(chunk, (bytes, bytearray)) or len(chunk) < 320:
+                    break
+
+                now = time.monotonic()
+                rms = self.compute_pcm16_rms_dbfs(chunk)
+                self._audio_rx_rms_samples.append(rms)
+
+                if self._audio_rx_last_log_ts == 0.0:
+                    self._audio_rx_last_log_ts = now
+                elif now - self._audio_rx_last_log_ts >= 5.0:
+                    elapsed = now - self._audio_rx_last_log_ts
+                    avg_rms = (
+                        sum(self._audio_rx_rms_samples) / len(self._audio_rx_rms_samples)
+                        if self._audio_rx_rms_samples
+                        else -96.0
+                    )
+                    _LOGGER.debug(
+                        "audio_rx device=%s pkts=%d bytes=%d rate=%.1f fps rms=%.1f dBFS",
+                        self.device_id,
+                        self._audio_rx_pkts,
+                        self._audio_rx_bytes,
+                        len(self._audio_rx_rms_samples) / elapsed if elapsed > 0 else 0.0,
+                        avg_rms,
+                    )
+                    self._audio_rx_rms_samples.clear()
+                    self._audio_rx_last_log_ts = now
+
+                for cb in list(self._rx_pcm16_callbacks):
+                    try:
+                        cb(chunk)
+                    except Exception as err:
+                        _LOGGER.debug("Audio RX callback error: %s", err)
+
+                await asyncio.sleep(0)
+        except Exception as err:
+            _LOGGER.debug("FFmpeg audio reader error: %s", err)
+
     async def _event_loop_lag_loop(self) -> None:
         """Monitor event loop lag and FFmpeg CPU usage."""
         max_lag_ms = 0.0
@@ -860,16 +1162,9 @@ class CloudSipMediaSession:
             except Exception:
                 pass
 
-            try:
-                while self._audio_sock:
-                    pkt, _ = self._audio_sock.recvfrom(65535)
-                    if pkt:
-                        had_pkts = True
-                        audio_rx_pkts += 1
-            except (BlockingIOError, InterruptedError):
-                pass
-            except Exception:
-                pass
+            if self.enable_audio:
+                if self._process_inbound_audio_socket():
+                    had_pkts = True
 
             if now - last_stats_log >= 5.0:
                 elapsed = now - last_stats_log
@@ -877,7 +1172,7 @@ class CloudSipMediaSession:
                 _LOGGER.debug("video rx pkts=%d bytes=%d", video_rx_pkts, video_rx_bytes)
                 _LOGGER.debug("video src frames=%d src_fps=%.1f", video_src_frames, src_fps)
                 _LOGGER.debug("video max_pkt_gap_ms=%.0f", max_pkt_gap_ms)
-                _LOGGER.debug("audio rx pkts=%d", audio_rx_pkts)
+                _LOGGER.debug("audio rx pkts=%d", self._audio_rx_pkts)
                 last_stats_log = now
                 last_src_frames = video_src_frames
                 max_pkt_gap_ms = 0.0
@@ -1007,6 +1302,12 @@ class CloudSipMediaSession:
             self._ffmpeg_port = s_ff.getsockname()[1]
             s_ff.close()
 
+            if self.enable_audio:
+                s_ff_audio = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s_ff_audio.bind(("127.0.0.1", 0))
+                self._ffmpeg_audio_port = s_ff_audio.getsockname()[1]
+                s_ff_audio.close()
+
             # Connect and REGISTER with retry on timeout
             status_code = 0
             for reg_attempt in range(4):
@@ -1067,6 +1368,7 @@ class CloudSipMediaSession:
 
             # INVITE
             srtp_audio_key = base64.b64encode(os.urandom(30)).decode("ascii")
+            self._srtp_tx_audio_key = base64.b64decode(srtp_audio_key)
             srtp_video_key = base64.b64encode(os.urandom(30)).decode("ascii")
             cseq_inv = 1
             inv_pkt = self.build_invite_packet(
@@ -1227,6 +1529,10 @@ class CloudSipMediaSession:
             remote_ip = parsed_sdp["remote_ip"] or self._sip_domain
             remote_video_port = parsed_sdp["remote_video_port"]
             remote_audio_port = parsed_sdp["remote_audio_port"]
+            self._remote_ip = remote_ip
+            self._remote_audio_port = remote_audio_port
+            pt_str = parsed_sdp.get("audio_payload_type") or "0"
+            self._audio_payload_type = int(pt_str) if str(pt_str).isdigit() else 0
             _LOGGER.debug(
                 "SIP media session started: local audio_port=%d video_port=%d, "
                 "remote ip=%s audio_remote_port=%d video_remote_port=%d, negotiated_audio_pt=%s",
@@ -1245,16 +1551,24 @@ class CloudSipMediaSession:
                 crypto_key=parsed_sdp["crypto_key"],
                 video_fmtp=parsed_sdp["video_fmtp"],
             )
+            await self._async_write_sdp_file(self._sdp_path, sdp_content)
 
-            def _write_sdp_file(path: str, data: str) -> None:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(data)
-                try:
-                    os.chmod(path, 0o600)
-                except Exception:
-                    pass
-
-            await asyncio.to_thread(_write_sdp_file, self._sdp_path, sdp_content)
+            callee_audio_key = parsed_sdp.get("callee_audio_key")
+            if self.enable_audio and self._ffmpeg_audio_port and callee_audio_key:
+                callee_audio_suite = parsed_sdp.get("callee_audio_suite") or "AES_CM_128_HMAC_SHA1_80"
+                audio_pt = parsed_sdp.get("audio_payload_type") or "0"
+                self._audio_sdp_path = f"/tmp/ave_video44_audio_{self.device_id}_{uuid.uuid4().hex[:6]}.sdp"
+                audio_sdp_content = self._generate_audio_sdp(
+                    ffmpeg_audio_port=self._ffmpeg_audio_port,
+                    crypto_suite=callee_audio_suite,
+                    crypto_key=callee_audio_key,
+                    payload_type=audio_pt,
+                )
+                await self._async_write_sdp_file(self._audio_sdp_path, audio_sdp_content)
+                await self._start_ffmpeg_audio_subprocess(self._audio_sdp_path)
+                if self._ffmpeg_audio_proc:
+                    self._ffmpeg_audio_task = asyncio.create_task(self._ffmpeg_audio_stdout_loop())
+                    self._tasks.append(self._ffmpeg_audio_task)
 
             ffmpeg_cmd = [
                 self.ffmpeg_binary,
@@ -1348,6 +1662,21 @@ class CloudSipMediaSession:
             t.cancel()
         self._tasks.clear()
 
+        if self._ffmpeg_audio_task:
+            self._ffmpeg_audio_task.cancel()
+            self._ffmpeg_audio_task = None
+
+        if self._ffmpeg_audio_proc:
+            try:
+                self._ffmpeg_audio_proc.terminate()
+                await asyncio.wait_for(self._ffmpeg_audio_proc.wait(), timeout=0.5)
+            except (Exception, asyncio.CancelledError):
+                try:
+                    self._ffmpeg_audio_proc.kill()
+                except Exception:
+                    pass
+            self._ffmpeg_audio_proc = None
+
         if self._ffmpeg_proc:
             try:
                 self._ffmpeg_proc.terminate()
@@ -1378,21 +1707,22 @@ class CloudSipMediaSession:
         self._rtcp_sock = None
         self._audio_sock = None
 
-        if self._sdp_path:
-            def _remove_sdp_file(path: str) -> None:
-                if os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
-
+        if self._audio_sdp_path:
             try:
-                await asyncio.to_thread(_remove_sdp_file, self._sdp_path)
+                await self._async_remove_sdp_file(self._audio_sdp_path)
             except (Exception, asyncio.CancelledError):
-                _remove_sdp_file(self._sdp_path)
+                pass
+            self._audio_sdp_path = None
+
+        if self._sdp_path:
+            try:
+                await self._async_remove_sdp_file(self._sdp_path)
+            except (Exception, asyncio.CancelledError):
+                pass
             self._sdp_path = None
 
         self._rx_buf.clear()
+        self._tx_audio_queue.clear()
         self._reg_call_id = None
         self._reg_tag = None
 

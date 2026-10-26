@@ -16,6 +16,26 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.0 — 2026-10-26
+
+### 🇬🇧 English
+- **Feature (Two-Way Audio)**: Full bidirectional audio support for outdoor doorstations and indoor intercoms.
+- **Audio RX (Listening)**: Real-time incoming audio playback during camera monitoring and active calls via WebAudio.
+- **Audio TX (Talking)**: Real-time outbound voice streaming from HA Companion App microphone with hardware echo cancellation downsampled to 8000 Hz PCM16.
+- **SRTP & Codecs**: Pure-Python G.711u / G.711a companding tables and RFC 3711 AES-CTR packetizer with HMAC-SHA1-80 auth tag.
+- **Resilience**: Jitter buffer with 120ms initial playout and 300ms clamping; graceful fallback to listen-only mode on desktop devices lacking a microphone.
+- **Telemetry & Safety**: Periodic RMS dBFS audio level logging in debug mode; `enable_audio` toggle in options flow.
+- **Fix (Lock Relay Mapping)**: Fixed lock relay mapping on 2-wire bus: Lock 1 (Pedestrian) commands functionId="3", Lock 2 (Driveway) commands functionId="23", fixing pedestrian gate unresponsiveness and gate inversion.
+
+### 🇮🇹 Italiano
+- **Novità (Audio Bidirezionale)**: Supporto completo all'audio bidirezionale per posti esterni e intercom interni.
+- **Audio RX (Ascolto)**: Riproduzione audio in tempo reale durante il monitoraggio telecamera e in chiamata attiva tramite WebAudio.
+- **Audio TX (Parlato)**: Trasmissione vocale in tempo reale dal microfono dell'app Home Assistant Companion con cancellazione d'eco hardware e campionamento a 8000 Hz PCM16.
+- **SRTP & Codec**: Tabelle pure-Python per compressione ITU-T G.711u / G.711a e packetizer RFC 3711 AES-CTR con auth tag HMAC-SHA1-80.
+- **Resilienza**: Jitter buffer WebAudio con avvio a 120ms e clamping a 300ms; fallback automatico in modalità solo ascolto per workstation desktop prive di microfono.
+- **Telemetria & Sicurezza**: Rilevamento periodico dei livelli RMS in dBFS nei log di debug; opzione `enable_audio` configurabile nelle opzioni dell'integrazione.
+- **Correzione (Mappatura Serrature)**: Risolta l'anomalia di apertura serrature su bus a 2 fili: Lock 1 (Pedonale) comanda functionId="3" e Lock 2 (Carraio) comanda functionId="23", ripristinando il corretto funzionamento del cancelletto pedonale ed eliminando l'inversione.
+
 ## v1.2.16 — 2026-10-26
 
 ### 🇬🇧 English

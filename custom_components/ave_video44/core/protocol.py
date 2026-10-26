@@ -167,3 +167,61 @@ def pcm16_to_alaw(pcm16_data: bytes) -> bytes:
         idx = pcm16_data[2 * i] | (pcm16_data[2 * i + 1] << 8)
         out[i] = table[idx]
     return bytes(out)
+
+
+# Pure-Python ITU-T G.711 u-law lookup tables.
+_BIAS = 0x84
+_CLIP = 32635
+_SEG_UEND = (0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF, 0x3FFF, 0x7FFF)
+
+
+def _ulaw2linear(u_val: int) -> int:
+    u_val = ~u_val & 0xFF
+    t = ((u_val & 0x0F) << 3) + _BIAS
+    t <<= (u_val & 0x70) >> 4
+    return (_BIAS - t) if (u_val & 0x80) else (t - _BIAS)
+
+
+def _linear2ulaw(pcm_val: int) -> int:
+    if pcm_val < 0:
+        pcm_val = _BIAS - pcm_val
+        mask = 0x7F
+    else:
+        pcm_val += _BIAS
+        mask = 0xFF
+    if pcm_val > 0x7FFF:
+        pcm_val = 0x7FFF
+    seg = 8
+    for i, boundary in enumerate(_SEG_UEND):
+        if pcm_val <= boundary:
+            seg = i
+            break
+    if seg >= 8:
+        return 0x7F ^ mask
+    uval = (seg << 4) | ((pcm_val >> (seg + 3)) & 0x0F)
+    return uval ^ mask
+
+
+_ULAW_TO_PCM16_BYTES = [struct.pack("<h", _ulaw2linear(i)) for i in range(256)]
+
+_PCM16_TO_ULAW_TABLE = bytes(
+    _linear2ulaw(u if u < 32768 else u - 65536) for u in range(65536)
+)
+
+
+def ulaw_to_pcm16(ulaw_data: bytes) -> bytes:
+    """Convert G.711u (PCMU) bytes to 16-bit little-endian linear PCM."""
+    table = _ULAW_TO_PCM16_BYTES
+    return b"".join(table[b] for b in ulaw_data)
+
+
+def pcm16_to_ulaw(pcm16_data: bytes) -> bytes:
+    """Convert 16-bit little-endian linear PCM bytes to G.711u (PCMU) bytes."""
+    table = _PCM16_TO_ULAW_TABLE
+    num_samples = len(pcm16_data) // 2
+    out = bytearray(num_samples)
+    for i in range(num_samples):
+        idx = pcm16_data[2 * i] | (pcm16_data[2 * i + 1] << 8)
+        out[i] = table[idx]
+    return bytes(out)
+

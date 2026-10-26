@@ -459,7 +459,7 @@ On 2-wire bus systems (`protocol="0"`), outdoor doorstations do not expose indep
 - **Endpoint**: `POST /smarthome/api/device/command/control`
 - **Request Parameters**:
   - `deviceId`: Device identifier of the indoor monitor unit.
-  - `functionId`: `"23"` for Lock 1 (pedestrian gate); `"24"` for Lock 2 (driveway sliding gate).
+  - `functionId`: `"3"` for Lock 1 (pedestrian gate); `"23"` for Lock 2 (driveway sliding gate); `"24"` for Lock 3 (auxiliary gate).
   - `value`: JSON string formatted as `{"outDoorNumber":"1","lockStatus":1}`.
 - **Origin**: Reverse-engineered directly from Android companion app bytecode (`LinphoneTalkBack.unlock`).
 

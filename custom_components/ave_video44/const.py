@@ -1,5 +1,7 @@
 """Constants for the AVE Video V44 integration."""
 
+from typing import Final
+
 DOMAIN = "ave_video44"
 
 # Cloud client credentials and endpoints
@@ -118,10 +120,12 @@ CONF_UNLOCK_PULSE_DURATION = "unlock_pulse_duration"
 CONF_PREFERRED_VIDEO_STREAM = "preferred_video_stream"
 CONF_TTS_AUTO_ANNOUNCE = "tts_auto_announce"
 CONF_ENABLE_SIDEBAR_PANEL = "enable_sidebar_panel"
+CONF_ENABLE_AUDIO: Final = "enable_audio"
 
 DEFAULT_UNLOCK_PULSE_DURATION = 2
 DEFAULT_PREFERRED_VIDEO_STREAM = "sub_stream"
 DEFAULT_TTS_AUTO_ANNOUNCE = True
 DEFAULT_INTERCOM_BOOK = ""
 DEFAULT_ENABLE_SIDEBAR_PANEL = True
+DEFAULT_ENABLE_AUDIO: Final = True
 

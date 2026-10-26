@@ -10,12 +10,14 @@ from homeassistant.core import callback
 from .const import (
     CONF_ACCOUNT,
     CONF_AUTH_METHOD,
+    CONF_ENABLE_AUDIO,
     CONF_INTERCOM_BOOK,
     CONF_OTP,
     CONF_PASSWORD,
     CONF_PREFERRED_VIDEO_STREAM,
     CONF_UNLOCK_PULSE_DURATION,
     CONF_ENABLE_SIDEBAR_PANEL,
+    DEFAULT_ENABLE_AUDIO,
     DEFAULT_INTERCOM_BOOK,
     DEFAULT_PREFERRED_VIDEO_STREAM,
     DEFAULT_UNLOCK_PULSE_DURATION,
@@ -105,6 +107,7 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
                             CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
                             CONF_ENABLE_SIDEBAR_PANEL: DEFAULT_ENABLE_SIDEBAR_PANEL,
+                            CONF_ENABLE_AUDIO: DEFAULT_ENABLE_AUDIO,
                         },
                     )
             except Exception as err:
@@ -198,6 +201,7 @@ class AveVideo44ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_UNLOCK_PULSE_DURATION: DEFAULT_UNLOCK_PULSE_DURATION,
                             CONF_PREFERRED_VIDEO_STREAM: DEFAULT_PREFERRED_VIDEO_STREAM,
                             CONF_ENABLE_SIDEBAR_PANEL: DEFAULT_ENABLE_SIDEBAR_PANEL,
+                            CONF_ENABLE_AUDIO: DEFAULT_ENABLE_AUDIO,
                         },
                     )
             except Exception as err:
@@ -249,6 +253,10 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                 options.update(user_input)
                 return self.async_create_entry(title="", data=options)
             action = user_input["action"]
+            if CONF_ENABLE_AUDIO in user_input and self.config_entry:
+                opts = dict(self.config_entry.options or {})
+                opts[CONF_ENABLE_AUDIO] = user_input[CONF_ENABLE_AUDIO]
+                self.config_entry.options = opts
             if action == "auto_discover":
                 return await self.async_step_auto_discover()
             if action == "add_intercom":
@@ -257,6 +265,16 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_remove_intercom()
             if action == "settings":
                 return await self.async_step_settings()
+
+        current_audio = DEFAULT_ENABLE_AUDIO
+        if self.config_entry and self.config_entry.options:
+            current_audio = self.config_entry.options.get(
+                CONF_ENABLE_AUDIO,
+                self.config_entry.data.get(CONF_ENABLE_AUDIO, DEFAULT_ENABLE_AUDIO)
+                if self.config_entry.data else DEFAULT_ENABLE_AUDIO
+            )
+        elif self.config_entry and self.config_entry.data:
+            current_audio = self.config_entry.data.get(CONF_ENABLE_AUDIO, DEFAULT_ENABLE_AUDIO)
 
         return self.async_show_form(
             step_id="init",
@@ -267,6 +285,7 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                     "remove_intercom": "Rimuovi interno dalla rubrica",
                     "settings": "Impostazioni generali",
                 }),
+                vol.Optional(CONF_ENABLE_AUDIO, default=current_audio): bool,
             }),
         )
 
@@ -382,6 +401,10 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                 CONF_ENABLE_SIDEBAR_PANEL,
                 options.get(CONF_ENABLE_SIDEBAR_PANEL, DEFAULT_ENABLE_SIDEBAR_PANEL),
             )
+            options[CONF_ENABLE_AUDIO] = user_input.get(
+                CONF_ENABLE_AUDIO,
+                options.get(CONF_ENABLE_AUDIO, DEFAULT_ENABLE_AUDIO),
+            )
             return self.async_create_entry(title="", data=options)
 
         current_pulse = options.get(
@@ -392,6 +415,9 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
         )
         current_sidebar = options.get(
             CONF_ENABLE_SIDEBAR_PANEL, DEFAULT_ENABLE_SIDEBAR_PANEL
+        )
+        current_audio = options.get(
+            CONF_ENABLE_AUDIO, DEFAULT_ENABLE_AUDIO
         )
 
         return self.async_show_form(
@@ -405,6 +431,9 @@ class AveVideo44OptionsFlow(config_entries.OptionsFlow):
                 ): vol.In(["sub_stream", "main_stream"]),
                 vol.Optional(
                     CONF_ENABLE_SIDEBAR_PANEL, default=current_sidebar
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_AUDIO, default=current_audio
                 ): bool,
             }),
         )

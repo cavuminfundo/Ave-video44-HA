@@ -15,9 +15,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_ACCOUNT,
+    CONF_ENABLE_AUDIO,
     CONF_INTERCOM_BOOK,
     CONF_PASSWORD,
     CONF_UNLOCK_PULSE_DURATION,
+    DEFAULT_ENABLE_AUDIO,
     DEFAULT_PREFERRED_VIDEO_STREAM,
     DEFAULT_UNLOCK_PULSE_DURATION,
     DOMAIN,
@@ -263,6 +265,15 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                             except Exception:
                                 pass
 
+                            enable_audio = (
+                                self.entry.options.get(
+                                    CONF_ENABLE_AUDIO,
+                                    self.entry.data.get(CONF_ENABLE_AUDIO, DEFAULT_ENABLE_AUDIO),
+                                )
+                                if hasattr(self, "entry") and self.entry
+                                else DEFAULT_ENABLE_AUDIO
+                            )
+
                             session = CloudSipMediaSession(
                                 device_id=dev_str,
                                 sip_username=str(sip_acct["username"]),
@@ -272,6 +283,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                                 target_device_num=str(mon_num or "1"),
                                 sender_name="Citofono",
                                 ffmpeg_binary=ffmpeg_bin,
+                                enable_audio=enable_audio,
                             )
                             self.cloud_sip_sessions[dev_str] = session
                             started_sip = await session.async_start()
@@ -493,6 +505,16 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             except Exception:
                 pass
 
+            enable_audio = (
+                self.entry.options.get(CONF_ENABLE_AUDIO)
+                if self.entry and hasattr(self.entry, "options") and CONF_ENABLE_AUDIO in self.entry.options
+                else (
+                    self.entry.data.get(CONF_ENABLE_AUDIO, DEFAULT_ENABLE_AUDIO)
+                    if self.entry and hasattr(self.entry, "data")
+                    else DEFAULT_ENABLE_AUDIO
+                )
+            )
+
             session = CloudSipMediaSession(
                 device_id=dev_str,
                 sip_username=str(sip_acct["username"]),
@@ -502,6 +524,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 target_device_num=str(mon_num or "1"),
                 sender_name="Citofono",
                 ffmpeg_binary=ffmpeg_bin,
+                enable_audio=enable_audio,
             )
             started = await session.async_start()
             if not started:

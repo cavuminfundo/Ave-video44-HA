@@ -172,7 +172,7 @@
 ## 2026-10-25 — v1.2.5 2-Wire Bus Hardware Lock Control & Auto-Wake Handshake
 
 ### 25. 2-Wire Bus Relay Unlock via commandDevice & Standby Auto-Wake
-- Command Architecture: On 2-wire bus systems (`protocol="0"`), outdoor doorstation relays are not addressed directly by IP or LAN UDP. Unlocking must be commanded via the cloud endpoint `POST /smarthome/api/device/command/control` using `functionId="23"` for Lock 1 (pedestrian) and `functionId="24"` for Lock 2 (driveway), with payload `value='{"outDoorNumber":"1","lockStatus":1}'` (reverse-engineered from `LinphoneTalkBack.unlock`).
+- Command Architecture: On 2-wire bus systems (`protocol="0"`), outdoor doorstation relays are not addressed directly by IP or LAN UDP. Unlocking must be commanded via the cloud endpoint `POST /smarthome/api/device/command/control` using `functionId="3"` for Lock 1 (pedonale), `functionId="23"` for Lock 2 (carraio tv_lock_2), and `functionId="24"` for Lock 3 (ll_unlock_3_bottom), with payload `value='{"outDoorNumber":"1","lockStatus":1}'` (reverse-engineered from `LinphoneTalkBack.unlock`).
 - Standby Power Invariant: The 2-wire outdoor doorstation relay coils are physically unpowered when idle. Triggering `commandDevice` while `call_state === "idle"` results in failure or timeouts because the relay driver lacks bus operating voltage.
 - Auto-Wake Handshake: An unlock request during standby must execute a brief temporary SIP/SRTP auto-wake handshake to energize the 2-wire bus before issuing the relay trigger payload, ensuring dependable latch actuation at all times.
 

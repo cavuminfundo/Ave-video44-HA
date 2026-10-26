@@ -319,10 +319,16 @@ class AveCloudApi:
         monitoring_device_number: str = "1",
         home_id: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Send device command control unlock (functionId 23 for lock 1, 24 for lock 2)."""
+        """Send device command control unlock (functionId 3 for lock 1/pedestrian, 23 for lock 2/driveway, 24 for lock 3)."""
         session = await self._get_session()
         params = self._signed_query()
-        function_id = "24" if str(lock_id) == "2" else "23"
+        lock_str = str(lock_id)
+        if lock_str == "2":
+            function_id = "23"
+        elif lock_str == "3":
+            function_id = "24"
+        else:
+            function_id = "3"
         val = json.dumps(
             {"outDoorNumber": str(monitoring_device_number), "lockStatus": 1},
             separators=(",", ":"),

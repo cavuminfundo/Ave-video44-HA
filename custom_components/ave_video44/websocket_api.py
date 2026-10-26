@@ -40,6 +40,20 @@ def _get_coordinator(
     raise websocket_api.WebSocketError("not_found", "No AVE Video V44 coordinator found")
 
 
+def get_active_sip_session(coordinator: AveVideo44Coordinator, device_id: Any) -> Any:
+    """Resolve active SIP session: CloudSipMediaSession for device, or fallback to LAN AveSipSession."""
+    dev_str = str(device_id) if device_id is not None else ""
+    if dev_str and hasattr(coordinator, "cloud_sip_sessions"):
+        cloud_sess = coordinator.cloud_sip_sessions.get(dev_str)
+        if cloud_sess and getattr(cloud_sess, "is_active", False):
+            return cloud_sess
+
+    if coordinator.sip_session and not getattr(coordinator.sip_session, "is_closed", True):
+        return coordinator.sip_session
+
+    return None
+
+
 @websocket_api.websocket_command({
     vol.Required("type"): "ave_video44/call_control",
     vol.Optional("entry_id"): str,
@@ -96,6 +110,12 @@ async def ws_audio_tx(
     coordinator = _get_coordinator(hass, msg.get("entry_id"), msg.get("device_id"))
     device_id = msg.get("device_id")
     try:
+        session = get_active_sip_session(coordinator, device_id)
+        if not session:
+            raise websocket_api.WebSocketError(
+                "not_found", f"No active SIP session for device {device_id}"
+            )
+
         pcm16_data = base64.b64decode(msg["payload"])
         now = time.monotonic()
         session_key = (id(connection), str(device_id))
@@ -136,8 +156,14 @@ async def ws_audio_tx(
             for k in stale:
                 _AUDIO_TX_SESSIONS.pop(k, None)
 
-        coordinator.sip_session.send_pcm16_frame(pcm16_data)
+        if hasattr(session, "send_pcm16_frame"):
+            session.send_pcm16_frame(pcm16_data)
+        elif hasattr(session, "send_audio_frame"):
+            session.send_audio_frame(pcm16_data)
+
         connection.send_result(msg["id"], {"success": True})
+    except websocket_api.WebSocketError:
+        raise
     except Exception as err:
         _LOGGER.error("Failed to forward audio frame: %s", err)
         connection.send_error(msg["id"], "audio_tx_failed", str(err))
@@ -186,17 +212,24 @@ async def ws_audio_subscribe(
         b64_payload = base64.b64encode(pcm16_frame).decode("ascii")
         connection.send_event(msg["id"], {"payload": b64_payload})
 
-    if hasattr(coordinator.sip_session, "add_rx_pcm16_callback"):
-        coordinator.sip_session.add_rx_pcm16_callback(_audio_rx_callback)
-    else:
-        coordinator.sip_session.set_rx_pcm16_callback(_audio_rx_callback)
+    dev_str = str(device_id) if device_id is not None else ""
+    target_session = get_active_sip_session(coordinator, device_id)
+    if dev_str and hasattr(coordinator, "cloud_sip_sessions"):
+        cloud_sess = coordinator.cloud_sip_sessions.get(dev_str)
+        if cloud_sess and (target_session is None or target_session is coordinator.sip_session):
+            target_session = cloud_sess
+
+    if target_session and hasattr(target_session, "add_rx_pcm16_callback"):
+        target_session.add_rx_pcm16_callback(_audio_rx_callback)
+    elif target_session and hasattr(target_session, "set_rx_pcm16_callback"):
+        target_session.set_rx_pcm16_callback(_audio_rx_callback)
 
     @callback
     def _unsubscribe() -> None:
-        if hasattr(coordinator.sip_session, "remove_rx_pcm16_callback"):
-            coordinator.sip_session.remove_rx_pcm16_callback(_audio_rx_callback)
-        else:
-            coordinator.sip_session.set_rx_pcm16_callback(None)
+        if target_session and hasattr(target_session, "remove_rx_pcm16_callback"):
+            target_session.remove_rx_pcm16_callback(_audio_rx_callback)
+        elif target_session and hasattr(target_session, "set_rx_pcm16_callback"):
+            target_session.set_rx_pcm16_callback(None)
 
     connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"], {"subscribed": True})

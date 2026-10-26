@@ -401,3 +401,109 @@ def test_readme_documentation():
     assert "Blueprint" in content or "blueprint" in content
     assert "incoming_call" in content or "doorbell" in content
     assert not _contains_emoji(content), "README.md must not contain decorative emojis"
+
+
+# ---------------------------------------------------------------------------
+# Test Suite 5: Frontend Audio RX Playback, WebAudio & Gesture Synchronization
+# ---------------------------------------------------------------------------
+
+
+def _extract_js_method(content: str, method_name: str) -> str:
+    """Extract method body from JS class by finding method declaration and matching braces."""
+    pattern = rf"(?:async\s+)?{method_name}\s*\([^)]*\)\s*\{{"
+    match = re.search(pattern, content)
+    assert match is not None, f"Method {method_name} not found in card JS"
+    start_pos = match.end() - 1
+    depth = 0
+    for i in range(start_pos, len(content)):
+        char = content[i]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start_pos + 1 : i]
+    raise AssertionError(f"Could not find matching closing brace for {method_name}")
+
+
+def test_card_ensure_audiocontext_synchronous_gesture():
+    """Verify _ensureAudioContext is defined and called synchronously in click handlers before await."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    assert "_ensureAudioContext()" in content, "CARD_PATH must contain _ensureAudioContext()"
+
+    for method_name in ("_monitor", "_answer", "_callIntercom"):
+        body = _extract_js_method(content, method_name)
+        assert "this._ensureAudioContext()" in body, (
+            f"Method {method_name} must invoke this._ensureAudioContext()"
+        )
+        ensure_pos = body.find("this._ensureAudioContext()")
+        await_match = re.search(r"\bawait\b", body)
+        if await_match:
+            await_pos = await_match.start()
+            assert ensure_pos < await_pos, (
+                f"In {method_name}, this._ensureAudioContext() must occur before any await "
+                f"(ensure at {ensure_pos}, await at {await_pos})"
+            )
+
+
+def test_card_audio_rx_jitter_buffer_clamping():
+    """Verify _playIncomingPcm16 schedules audio with 120ms jitter buffer and 300ms clamp."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    body = _extract_js_method(content, "_playIncomingPcm16")
+    assert "0.120" in body or "0.12" in body, (
+        "_playIncomingPcm16 must schedule initial playback at 120ms (0.120 or 0.12)"
+    )
+    assert "0.300" in body or "0.3" in body, (
+        "_playIncomingPcm16 must clamp maximum jitter buffer delay at 300ms (0.300 or 0.3)"
+    )
+    assert "Math.min" in body, (
+        "_playIncomingPcm16 must use Math.min for clamping maximum jitter buffer delay"
+    )
+
+
+def test_card_webview_compatibility_zero_optional_chaining():
+    """Verify zero optional chaining (?.) and nullish coalescing (??) for legacy WebView compatibility."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    assert "?." not in content, "Modern optional chaining '?.' forbidden for WebView compatibility"
+    assert "??" not in content, "Modern nullish coalescing '??' forbidden for WebView compatibility"
+
+
+# ---------------------------------------------------------------------------
+# Test Suite 6: Frontend Audio TX Capture, Resampling & Graceful Fallback
+# ---------------------------------------------------------------------------
+
+
+def test_card_graceful_mic_fallback_desktop():
+    """Verify _answer handles missing microphone with non-blocking fallback and active audio RX."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    answer_fn = _extract_js_method(content, "_answer")
+    assert "btnMute.disabled = true" in answer_fn or "disabled = true" in answer_fn
+    assert 'muteLabel.textContent = "Microfono assente"' in answer_fn or "Microfono assente" in answer_fn
+    assert "this._subscribeAudioRx()" in answer_fn, "Audio RX must continue even if mic is unavailable"
+
+
+def test_card_cleanup_restores_mute_state():
+    """Verify _cleanupCall re-enables mute button and restores default label."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    cleanup_fn = _extract_js_method(content, "_cleanupCall")
+    assert "btnMute.disabled = false" in cleanup_fn
+    assert 'muteLabel.textContent = "Muto"' in cleanup_fn
+
+
+def test_card_audio_tx_20ms_accumulator():
+    """Verify _startAudioTx accumulates 8kHz samples into 160-sample 20ms chunks."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    tx_fn = _extract_js_method(content, "_startAudioTx")
+    assert "160" in tx_fn, "_startAudioTx must chunk audio into 160 samples (20ms at 8000 Hz)"
+    assert "this._txAccumulator" in tx_fn or "txAccumulator" in tx_fn or "splice(0, 160)" in tx_fn, (
+        "_startAudioTx must accumulate samples in a FIFO queue before transmission"
+    )
+    assert "ave_video44/audio_tx" in tx_fn
+
+
+def test_card_version_bumped_1_3_0():
+    """Verify CARD_VERSION constant is bumped to 1.3.0."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    assert 'const CARD_VERSION = "1.3.0";' in content
+
+

@@ -1071,3 +1071,58 @@ async def test_coordinator_intercom_auto_discovery(mock_coordinator):
     assert discovered["2"] == "Posto Esterno 2"
 
 
+def test_get_active_sip_session_precedence(mock_coordinator):
+    """Verify get_active_sip_session prioritizes active CloudSipMediaSession over AveSipSession."""
+    from custom_components.ave_video44.websocket_api import get_active_sip_session
+
+    # 1. No cloud session, falls back to LAN sip_session
+    mock_coordinator.cloud_sip_sessions = {}
+    mock_coordinator.sip_session.is_closed = False
+    assert get_active_sip_session(mock_coordinator, 101) is mock_coordinator.sip_session
+
+    # 2. Active CloudSipMediaSession present
+    mock_cloud = MagicMock()
+    mock_cloud.is_active = True
+    mock_coordinator.cloud_sip_sessions = {"101": mock_cloud}
+    assert get_active_sip_session(mock_coordinator, 101) is mock_cloud
+
+    # 3. Cloud session inactive, fallback to LAN
+    mock_cloud.is_active = False
+    assert get_active_sip_session(mock_coordinator, 101) is mock_coordinator.sip_session
+
+
+@pytest.mark.asyncio
+async def test_ws_audio_subscribe_closure_safety(mock_hass, mock_coordinator):
+    """Verify ws_audio_subscribe closure unregisters from session even if coordinator drops it."""
+    from custom_components.ave_video44 import DOMAIN
+    from custom_components.ave_video44 import websocket_api as ws_api
+
+    mock_cloud = MagicMock()
+    mock_cloud.is_active = True
+    mock_coordinator.cloud_sip_sessions = {"9991": mock_cloud}
+    mock_hass.data[DOMAIN] = {"entries": {mock_coordinator.entry_id: mock_coordinator}}
+
+    conn = MagicMock()
+    conn.subscriptions = {}
+    conn.send_result = MagicMock()
+    conn.send_event = MagicMock()
+
+    msg = {
+        "id": 88,
+        "type": "ave_video44/audio_subscribe",
+        "entry_id": mock_coordinator.entry_id,
+        "device_id": 9991,
+    }
+
+    await ws_api.ws_audio_subscribe(mock_hass, conn, msg)
+    mock_cloud.add_rx_pcm16_callback.assert_called_once()
+
+    # Simulate coordinator losing reference to session before unsubscribe is called
+    mock_coordinator.cloud_sip_sessions.clear()
+
+    unsub = conn.subscriptions[88]
+    unsub()
+    mock_cloud.remove_rx_pcm16_callback.assert_called_once()
+
+
+

@@ -337,22 +337,28 @@ async def test_command_unlock_payload_and_headers():
 
     api = AveCloudApi(session=session, token="tok", session_id="sess")
 
-    # Lock 1 -> functionId "23"
+    # Lock 1 -> functionId "3"
     res1 = await api.command_unlock(device_id="dev_001", lock_id="1", monitoring_device_number="1", home_id=26299)
     assert res1["success"] is True
     call_args1 = session.post.call_args
     assert call_args1[0][0].endswith("/smarthome/api/device/command/control")
-    assert call_args1[1]["data"]["functionId"] == "23"
+    assert call_args1[1]["data"]["functionId"] == "3"
     assert call_args1[1]["data"]["value"] == '{"outDoorNumber":"1","lockStatus":1}'
     assert call_args1[1]["headers"]["HOME_ID"] == "26299"
     assert call_args1[1]["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
 
-    # Lock 2 -> functionId "24"
+    # Lock 2 -> functionId "23"
     res2 = await api.command_unlock(device_id="dev_001", lock_id="2", monitoring_device_number="1", home_id=26299)
     assert res2["success"] is True
     call_args2 = session.post.call_args
-    assert call_args2[1]["data"]["functionId"] == "24"
+    assert call_args2[1]["data"]["functionId"] == "23"
     assert call_args2[1]["data"]["value"] == '{"outDoorNumber":"1","lockStatus":1}'
+
+    # Lock 3 -> functionId "24"
+    res_lock3 = await api.command_unlock(device_id="dev_001", lock_id="3", monitoring_device_number="1", home_id=26299)
+    assert res_lock3["success"] is True
+    call_args_lock3 = session.post.call_args
+    assert call_args_lock3[1]["data"]["functionId"] == "24"
 
     # api.unlock with home_id
     res3 = await api.unlock(device_id="dev_001", lock_id="1", monitoring_device_number="1", home_id=26299)
