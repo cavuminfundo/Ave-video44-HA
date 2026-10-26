@@ -932,6 +932,8 @@ async def test_coordinator_unlock_faster_cold_unlock(mock_coordinator):
         mock_coordinator.api.unlock.assert_called_once_with(
             device_id=dev_id,
             lock_id="1",
+            monitoring_device_number="1",
+            home_id=mock_coordinator.home_id,
         )
         mock_coordinator.async_hangup_call.assert_called_once_with(dev_id)
 
@@ -1015,8 +1017,10 @@ async def test_cloud_sip_ffmpeg_target_fps_and_command():
 
 
 @pytest.mark.asyncio
-async def test_camera_mjpeg_stream_pre_renew_swap_ok(mock_coordinator):
+async def test_camera_mjpeg_stream_pre_renew_swap_ok(mock_coordinator, monkeypatch):
     """Verify pre-emptive make-before-break renewal swaps session smoothly when age >= 16s."""
+    import custom_components.ave_video44.camera as camera_module
+    monkeypatch.setattr(camera_module, "PRE_RENEW_ENABLED", True)
     from custom_components.ave_video44.camera import AveVideo44Camera
 
     dev_id = "9991"
@@ -1238,8 +1242,10 @@ async def test_coordinator_prepare_and_commit_renewal_session(mock_coordinator):
 
 
 @pytest.mark.asyncio
-async def test_camera_mjpeg_stream_disconnect_cleans_up_prepared_session(mock_coordinator):
+async def test_camera_mjpeg_stream_disconnect_cleans_up_prepared_session(mock_coordinator, monkeypatch):
     """Verify prepared renewal session is stopped if client disconnects before swap."""
+    import custom_components.ave_video44.camera as camera_module
+    monkeypatch.setattr(camera_module, "PRE_RENEW_ENABLED", True)
     from custom_components.ave_video44.camera import AveVideo44Camera
 
     dev_id = "9991"
@@ -1538,6 +1544,153 @@ async def test_camera_pre_renewal_failure_logging(caplog, mock_coordinator):
         assert sess is None
         assert "pre-renew failed stage=exception" in caplog.text
         assert "reason=ValueError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_camera_mjpeg_stream_fallback_on_rtp_timeout(mock_coordinator):
+    """Verify fallback renewal triggers when session stops due to rtp_timeout without remote BYE."""
+    from custom_components.ave_video44.camera import AveVideo44Camera
+
+    dev_id = "9991"
+    session1 = MagicMock()
+    session1.is_active = False
+    session1.remote_bye = False
+    session1.end_reason = "rtp_timeout"
+    session1.frame_seq = 1
+    session1.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_1\xff\xd9")
+    session1.wait_for_next_frame = AsyncMock(return_value=(1, None))
+
+    session2 = MagicMock()
+    session2.is_active = True
+    session2.remote_bye = False
+    session2.end_reason = None
+    session2.frame_seq = 1
+    session2.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8fake_jpeg_2\xff\xd9")
+
+    async def _mock_wait_next2(last_seq, timeout=0.5):
+        session2.is_active = False
+        return last_seq + 1, b"\xff\xd8fake_jpeg_2_b\xff\xd9"
+
+    session2.wait_for_next_frame = AsyncMock(side_effect=_mock_wait_next2)
+
+    mock_coordinator.cloud_sip_sessions = {dev_id: session1}
+    mock_coordinator.user_hangup = set()
+    mock_coordinator.async_wait_for_wake = AsyncMock()
+
+    async def _mock_wake(device_id):
+        mock_coordinator.cloud_sip_sessions[dev_id] = session2
+
+    mock_coordinator.async_wake_camera = AsyncMock(side_effect=_mock_wake)
+
+    cam = AveVideo44Camera(mock_coordinator, device_id=dev_id)
+
+    written_parts = []
+    fake_response = MagicMock()
+    fake_response.prepare = AsyncMock()
+    async def _mock_write(data):
+        written_parts.append(data)
+    fake_response.write = AsyncMock(side_effect=_mock_write)
+
+    with patch("aiohttp.web.StreamResponse", return_value=fake_response):
+        request = MagicMock()
+        resp = await cam.handle_async_mjpeg_stream(request)
+        assert resp is fake_response
+        mock_coordinator.async_wake_camera.assert_called_once_with(dev_id)
+        written_bytes = b"".join(written_parts)
+        assert b"fake_jpeg_1" in written_bytes
+        assert b"fake_jpeg_2" in written_bytes
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_rtp_timeout_at_25s(monkeypatch):
+    """Verify _udp_relay_loop marks end_reason='rtp_timeout' when gap > 3.0s and age >= 25s."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    monkeypatch.setattr(CloudSipMediaSession, "_last_session_stop_ts", 0.0)
+
+    sess = CloudSipMediaSession(
+        device_id="9991",
+        sip_username="user",
+        sip_password="pwd",
+        target_sip_uri="sip:101@cloud",
+    )
+    sess.is_active = True
+    now = time.monotonic()
+    sess._session_start_ts = now - 26.0
+    sess._last_rtp_ts = now - 3.5
+
+    # Run one iteration of _udp_relay_loop with dummy sockets
+    sess._video_sock = None
+    sess._audio_sock = None
+    sess._rtcp_sock = None
+
+    relay_task = asyncio.create_task(sess._udp_relay_loop("127.0.0.1", 20000, 20002))
+    await asyncio.wait_for(relay_task, timeout=1.0)
+
+    assert sess.is_active is False
+    assert sess.end_reason == "rtp_timeout"
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_register_retry_four_attempts(monkeypatch):
+    """Verify REGISTER retries up to 4 times with 2.5s read timeout and 0.5s backoff."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    monkeypatch.setattr(CloudSipMediaSession, "_last_session_stop_ts", 0.0)
+
+    sess = CloudSipMediaSession(
+        device_id="9991",
+        sip_username="user",
+        sip_password="pwd",
+        target_sip_uri="sip:101@cloud",
+    )
+
+    mock_reader = AsyncMock()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock()
+    mock_writer.drain = AsyncMock()
+    mock_writer.close = MagicMock()
+    mock_writer.wait_closed = AsyncMock()
+
+    attempt_count = 0
+    sdp_200 = (
+        "v=0\r\n"
+        "c=IN IP4 51.144.180.20\r\n"
+        "m=audio 25000 RTP/SAVP 8\r\n"
+        "m=video 25002 RTP/SAVP 96\r\n"
+        "a=rtpmap:96 H264/90000\r\n"
+        "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:cmVtb3RldmlkZW9rZXkxMjM0NTY3ODkwMTIzNDU2\r\n"
+    )
+
+    async def _mock_read():
+        nonlocal attempt_count
+        attempt_count += 1
+        if attempt_count < 3:
+            raise asyncio.TimeoutError()
+        elif attempt_count == 3:
+            return "SIP/2.0 200 OK", {"content-length": "0"}, ""
+        else:
+            return "SIP/2.0 200 OK", {"content-length": str(len(sdp_200)), "contact": "<sip:target@test.com>"}, sdp_200
+
+    sess._read_sip_msg = _mock_read
+    sess.wait_for_first_frame = AsyncMock(return_value=b"\xff\xd8frame\xff\xd9")
+
+    with patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)), \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        fake_proc = MagicMock()
+        fake_proc.stdout = AsyncMock()
+        fake_proc.stdout.read = AsyncMock(return_value=b"")
+        fake_proc.wait = AsyncMock()
+        fake_proc.terminate = MagicMock()
+        fake_proc.kill = MagicMock()
+        mock_exec.return_value = fake_proc
+
+        started = await asyncio.wait_for(sess.async_start(), timeout=2.0)
+        assert started is True
+        assert attempt_count >= 3
+        await sess.async_stop()
+
 
 
 

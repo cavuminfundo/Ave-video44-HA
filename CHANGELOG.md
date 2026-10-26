@@ -16,6 +16,34 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.16 — 2026-10-26
+
+### 🇬🇧 English
+
+- **Cloud SIP Video Stream Resilience**:
+  - Pre-renewal disabled by default (`PRE_RENEW_ENABLED = False`): real-world cloud telemetry showed the cloud rejects or ignores concurrent SIP REGISTER attempts while a session is active.
+  - Added session termination reason tracking (`end_reason`): detects RTP inactivity (>3.0s idle after 25s session age) marking `rtp_timeout` and promptly terminating the stale session.
+  - Camera fallback stream renewal now responds to both `remote_bye` and `rtp_timeout`, preventing stream freezing when the cloud stops RTP without sending BYE.
+  - Optimized SIP REGISTER retry: read timeout reduced to 2.5s with up to 4 attempts and 0.5s backoff (maximum 12s total).
+- **Structured Door Unlock & Error Handling**:
+  - `coordinator.async_unlock` now returns a structured outcome dictionary (`command_unlock_ok`, `unlock_ok`, `skipped_reason`, `success`).
+  - Added clean INFO audit logs for unlock operations with masked payloads (no secrets exposed) and explicit notification when unlock is skipped because SIP is inactive.
+  - `lock` and `button` entities raise `HomeAssistantError` if the unlock request fails or is skipped, preventing false "unlocked" states and phantom relock timers.
+  - Added optional `home_id` context parameter to `api.unlock` and `api.unlock_remote`.
+
+### 🇮🇹 Italiano
+
+- **Resilienza del Flusso Video Cloud SIP**:
+  - Pre-rinnovo disattivato di default (`PRE_RENEW_ENABLED = False`): la telemetria reale ha mostrato che il cloud ignora o rifiuta REGISTER concorrenti mentre una sessione è attiva.
+  - Tracciamento del motivo di chiusura sessione (`end_reason`): rileva l'inattività RTP (>3.0s senza pacchetti dopo 25s di sessione) contrassegnando `rtp_timeout` e chiudendo la sessione ferma.
+  - Il rinnovo fallback della telecamera si attiva ora sia su `remote_bye` che su `rtp_timeout`, prevenendo il blocco del video quando il cloud ferma l'RTP prima o senza inviare il BYE.
+  - Riprova REGISTER ottimizzata: timeout di lettura ridotto a 2.5s con fino a 4 tentativi e backoff a 0.5s (massimo 12s totali).
+- **Apertura Serratura Strutturata e Gestione Errori**:
+  - `coordinator.async_unlock` restituisce un dizionario strutturato con l'esito dei tentativi (`command_unlock_ok`, `unlock_ok`, `skipped_reason`, `success`).
+  - Aggiunti log INFO di audit per le operazioni di sblocco con parametri mascherati (nessun segreto) e segnalazione esplicita quando lo sblocco è saltato perché il SIP non è attivo.
+  - Le entità `lock` e `button` sollevano `HomeAssistantError` in caso di errore o sblocco non eseguibile, evitando falsi stati "sbloccato" e timer di riblocco errati.
+  - Parametro opzionale `home_id` aggiunto ad `api.unlock` e `api.unlock_remote` per inviare sempre l'header di contesto impianto.
+
 ## v1.2.15 — 2026-10-26
 
 ### 🇬🇧 English

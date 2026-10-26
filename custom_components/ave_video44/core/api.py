@@ -268,6 +268,7 @@ class AveCloudApi:
         device_id: str,
         lock_id: str = "1",
         monitoring_device_number: str = "1",
+        home_id: Optional[Any] = None,
     ) -> bool:
         """Remote unlock returning boolean status."""
         session = await self._get_session()
@@ -278,8 +279,9 @@ class AveCloudApi:
             "monitoringDeviceNumber": str(monitoring_device_number),
         }
         url = f"{self._base_url}/smarthome/api/device-monitoring/unlock"
+        headers = self._headers(home_id=home_id, form=True)
         async with asyncio.timeout(10.0):
-            async with session.post(url, params=params, data=data, headers=self._headers(form=True)) as resp:
+            async with session.post(url, params=params, data=data, headers=headers) as resp:
                 self._capture_cookies(resp)
                 resp_data = await resp.json()
                 return bool(
@@ -293,6 +295,7 @@ class AveCloudApi:
         device_id: str,
         lock_id: str = "1",
         monitoring_device_number: Optional[str] = "1",
+        home_id: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Send remote unlock command returning response dictionary."""
         session = await self._get_session()
@@ -303,8 +306,9 @@ class AveCloudApi:
             "monitoringDeviceNumber": str(monitoring_device_number or "1"),
         }
         url = f"{self._base_url}/smarthome/api/device-monitoring/unlock"
+        headers = self._headers(home_id=home_id, form=True)
         async with asyncio.timeout(10.0):
-            async with session.post(url, params=params, data=data, headers=self._headers(form=True)) as resp:
+            async with session.post(url, params=params, data=data, headers=headers) as resp:
                 self._capture_cookies(resp)
                 return await resp.json()
 

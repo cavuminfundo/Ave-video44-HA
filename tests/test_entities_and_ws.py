@@ -1,7 +1,7 @@
 """Tests for AVE Video V44 entities, coordinator, diagnostics, and WebSocket API."""
 
-import asyncio
 import base64
+import logging
 import sys
 from types import ModuleType
 from typing import Any
@@ -539,7 +539,9 @@ async def test_lock_entity_pedestrian_and_driveway(mock_coordinator):
 
     # Unlock pedestrian
     await lock_ped.async_unlock()
-    mock_coordinator.api.unlock.assert_called_with(device_id="9991", lock_id="1")
+    mock_coordinator.api.unlock.assert_called_with(
+        device_id="9991", lock_id="1", monitoring_device_number="1", home_id=mock_coordinator.home_id
+    )
     assert lock_ped.is_locked is False
 
     # Relock
@@ -560,7 +562,9 @@ async def test_button_entities(mock_coordinator):
     btn_hang = AveVideo44HangupButton(mock_coordinator, device_id=9991)
 
     await btn_unlock1.async_press()
-    mock_coordinator.api.unlock.assert_called_with(device_id="9991", lock_id="1")
+    mock_coordinator.api.unlock.assert_called_with(
+        device_id="9991", lock_id="1", monitoring_device_number="1", home_id=mock_coordinator.home_id
+    )
 
     mock_coordinator.async_call_intercom = AsyncMock()
     mock_coordinator.async_answer_call = AsyncMock()
@@ -574,6 +578,49 @@ async def test_button_entities(mock_coordinator):
 
     await btn_hang.async_press()
     mock_coordinator.async_hangup_call.assert_called_with("9991")
+
+
+@pytest.mark.asyncio
+async def test_unlock_failure_raises_home_assistant_error(mock_coordinator, caplog):
+    """Verify lock and button raise HomeAssistantError and lock stays locked on failure."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    lock_ped = AveVideo44Lock(mock_coordinator, device_id=9991, lock_id=1, name="Pedonale")
+    btn_unlock = AveVideo44UnlockButton(mock_coordinator, device_id=9991, lock_id=1)
+
+    mock_coordinator.api.command_unlock = AsyncMock(return_value={"code": 500, "message": "Cloud failure"})
+    mock_coordinator.api.unlock = AsyncMock(return_value={"code": 500, "message": "Cloud failure"})
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await lock_ped.async_unlock()
+        assert "Apertura non riuscita" in str(exc_info.value)
+        assert lock_ped.is_locked is True
+        assert "unlock device=9991 lock=1" in caplog.text
+
+    with pytest.raises(HomeAssistantError):
+        await btn_unlock.async_press()
+
+
+@pytest.mark.asyncio
+async def test_unlock_skipped_when_sip_not_active(mock_coordinator, caplog):
+    """Verify coordinator.async_unlock reports skipped_reason='sip_not_active' when session inactive."""
+    fake_session = MagicMock()
+    fake_session.is_active = False
+    fake_session.wait_for_sip_connected = AsyncMock(return_value=False)
+    mock_coordinator.cloud_sip_sessions["9991"] = fake_session
+    mock_coordinator.call_state = "idle"
+    mock_coordinator.async_wake_camera = AsyncMock()
+    mock_coordinator.async_hangup_call = AsyncMock()
+
+    with caplog.at_level(logging.INFO):
+        res = await mock_coordinator.async_unlock("9991", lock_id="1")
+        assert res["success"] is False
+        assert res["skipped_reason"] == "sip_not_active"
+        assert res["command_unlock_ok"] is False
+        assert res["unlock_ok"] is False
+        assert "unlock skipped: reason=sip_not_active" in caplog.text
+        assert "unlock device config: deviceNumber=" in caplog.text
 
 
 @pytest.mark.asyncio

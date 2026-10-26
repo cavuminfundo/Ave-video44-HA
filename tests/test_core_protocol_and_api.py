@@ -8,14 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.ave_video44.const import (
     MAGIC_HEADER,
-    COMMON_PORT,
-    AUDIO_PORT,
     ENTRANCEGUARD_FUNCTION,
     COM_REMOTE_UNLOCK_ASK,
     COM_REMOTE_UNLOCK_REPLY,
     DEV_DOORSTATION,
     DEV_INDOORPHONE,
-    DEFAULT_APP_SECRET,
 )
 from custom_components.ave_video44.core.protocol import (
     compute_gvs_sign,
@@ -357,6 +354,14 @@ async def test_command_unlock_payload_and_headers():
     assert call_args2[1]["data"]["functionId"] == "24"
     assert call_args2[1]["data"]["value"] == '{"outDoorNumber":"1","lockStatus":1}'
 
+    # api.unlock with home_id
+    res3 = await api.unlock(device_id="dev_001", lock_id="1", monitoring_device_number="1", home_id=26299)
+    assert res3["success"] is True
+    call_args3 = session.post.call_args
+    assert call_args3[0][0].endswith("/smarthome/api/device-monitoring/unlock")
+    assert call_args3[1]["headers"]["HOME_ID"] == "26299"
+    assert call_args3[1]["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+
 
 @pytest.mark.asyncio
 async def test_coordinator_async_unlock_cold_wake_and_active_session():
@@ -377,10 +382,17 @@ async def test_coordinator_async_unlock_cold_wake_and_active_session():
 
     # Case 1: Cold unlock when idle
     coord.call_state = "idle"
-    await coord.async_unlock("677771932745207808", lock_id="2")
+    outcome1 = await coord.async_unlock("677771932745207808", lock_id="2")
+    assert outcome1["success"] is True
+    assert outcome1["command_unlock_ok"] is True
+    assert outcome1["unlock_ok"] is True
     assert coord.async_wake_camera.called
-    assert coord.api.command_unlock.called
-    assert coord.api.unlock.called
+    coord.api.command_unlock.assert_called_with(
+        device_id="677771932745207808", lock_id="2", monitoring_device_number="1", home_id=26299
+    )
+    coord.api.unlock.assert_called_with(
+        device_id="677771932745207808", lock_id="2", monitoring_device_number="1", home_id=26299
+    )
     assert coord.async_hangup_call.called
 
     # Reset mocks
@@ -395,7 +407,8 @@ async def test_coordinator_async_unlock_cold_wake_and_active_session():
     mock_session.is_active = True
     coord.cloud_sip_sessions["677771932745207808"] = mock_session
 
-    await coord.async_unlock("677771932745207808", lock_id="1")
+    outcome2 = await coord.async_unlock("677771932745207808", lock_id="1")
+    assert outcome2["success"] is True
     assert not coord.async_wake_camera.called
     assert coord.api.command_unlock.called
     assert coord.api.unlock.called

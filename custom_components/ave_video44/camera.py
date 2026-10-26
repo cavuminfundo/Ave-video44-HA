@@ -16,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 MAX_MJPEG_RENEWALS: int = 20
 MAX_CONSECUTIVE_RENEW_FAILURES: int = 3
 PRE_RENEW_AFTER_S: float = 16.0
+PRE_RENEW_ENABLED: bool = False
 
 
 async def async_setup_entry(
@@ -284,7 +285,8 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
 
                                 session_age = now - session_start_ts
                                 if (
-                                    session.is_active
+                                    PRE_RENEW_ENABLED
+                                    and session.is_active
                                     and session_age >= PRE_RENEW_AFTER_S
                                     and not user_hungup
                                     and renewals < MAX_MJPEG_RENEWALS
@@ -328,7 +330,9 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                                 user_hungup = str(self.device_id) in self.coordinator.user_hangup
 
                             is_remote_bye = getattr(session, "remote_bye", False) is True
-                            if not is_remote_bye or user_hungup or renewals >= MAX_MJPEG_RENEWALS:
+                            end_reason = getattr(session, "end_reason", None)
+                            should_renew = is_remote_bye or end_reason in ("remote_bye", "rtp_timeout")
+                            if not should_renew or user_hungup or renewals >= MAX_MJPEG_RENEWALS:
                                 break
 
                             renew_success = False

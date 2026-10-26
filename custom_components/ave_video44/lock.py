@@ -7,6 +7,7 @@ from typing import Any, Optional
 from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_UNLOCK_PULSE_DURATION, DEFAULT_UNLOCK_PULSE_DURATION, DOMAIN
@@ -68,10 +69,13 @@ class AveVideo44Lock(AveVideo44BaseEntity, LockEntity):
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock door/gate and schedule automatic relock."""
         _LOGGER.debug("Unlocking lock %s on device %s", self._lock_id, self.device_id)
-        await self.coordinator.async_unlock(
+        outcome = await self.coordinator.async_unlock(
             device_id=self.device_id,
             lock_id=str(self._lock_id),
         )
+        if isinstance(outcome, dict) and not outcome.get("success"):
+            reason = outcome.get("skipped_reason") or "rifiutato dal cloud"
+            raise HomeAssistantError(f"Apertura non riuscita: {reason}")
 
         self._attr_is_locked = False
         self.async_write_ha_state()

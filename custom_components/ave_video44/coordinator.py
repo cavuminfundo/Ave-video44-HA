@@ -664,7 +664,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                         _LOGGER.debug("Error querying monitoring list for %s: %s", dev_id, err)
         return discovered
 
-    async def async_unlock(self, device_id: int | str, lock_id: int | str = "1") -> None:
+    async def async_unlock(self, device_id: int | str, lock_id: int | str = "1") -> Dict[str, Any]:
         """Unlock specified lock on device (with automatic wake on 2-wire bus if idle)."""
         dev_str = str(device_id)
         was_idle = (
@@ -700,8 +700,77 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         sess = self.cloud_sip_sessions.get(dev_str)
         can_unlock = (sess is None or sess.is_active or not was_idle)
-        if self.api and can_unlock:
-            home_id = getattr(self, "home_id", None)
+        if not can_unlock:
+            _LOGGER.info("unlock skipped: reason=sip_not_active")
+            dev = next((d for d in self.devices if str(d.get("deviceId")) == dev_str), None)
+            if dev:
+                extra = dev.get("extraConfig")
+                dev_num = extra.get("deviceNumber") if isinstance(extra, dict) else dev.get("deviceNumber")
+                outdoor_num = dev.get("outDoorNumber") if "outDoorNumber" in dev else (extra.get("outDoorNumber") if isinstance(extra, dict) else None)
+                _LOGGER.info("unlock device config: deviceNumber=%s outDoorNumber=%s", dev_num, outdoor_num)
+            return {
+                "command_unlock_ok": False,
+                "unlock_ok": False,
+                "skipped_reason": "sip_not_active",
+                "success": False,
+            }
+
+        if not self.api:
+            return {
+                "command_unlock_ok": False,
+                "unlock_ok": False,
+                "skipped_reason": "no_api",
+                "success": False,
+            }
+
+        def _is_call_successful(resp: Any) -> bool:
+            if resp is True:
+                return True
+            if not isinstance(resp, dict):
+                return False
+            if resp.get("success") is True:
+                return True
+            code = resp.get("code")
+            status_code = resp.get("statusCode")
+            return (
+                code in (0, "0", 200, "200")
+                or status_code in (0, "0", 200, "200")
+                or str(code) in ("0", "200")
+                or str(status_code) in ("0", "200")
+            )
+
+        def _log_unlock_call(func_name: str, resp: Any) -> None:
+            if isinstance(resp, dict):
+                code = resp.get("code") if "code" in resp else resp.get("statusCode")
+                success = resp.get("success")
+                raw_msg = resp.get("message") or resp.get("msg") or ""
+                clean_msg = str(raw_msg)[:120]
+            elif isinstance(resp, Exception):
+                code = type(resp).__name__
+                success = False
+                clean_msg = str(resp)[:120]
+            elif resp is True:
+                code = 0
+                success = True
+                clean_msg = "ok"
+            else:
+                code = "none"
+                success = False
+                clean_msg = ""
+            _LOGGER.info(
+                "unlock device=%s lock=%s cold=%s func=%s code=%s success=%s msg=%s",
+                dev_str,
+                lock_id,
+                was_idle,
+                func_name,
+                code,
+                success,
+                clean_msg,
+            )
+
+        home_id = getattr(self, "home_id", None)
+        command_unlock_ok = False
+        if hasattr(self.api, "command_unlock"):
             try:
                 cmd_res = await self.api.command_unlock(
                     device_id=dev_str,
@@ -709,18 +778,24 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     monitoring_device_number="1",
                     home_id=home_id,
                 )
-                _LOGGER.debug("Command unlock response: %s", cmd_res)
+                command_unlock_ok = _is_call_successful(cmd_res)
+                _log_unlock_call("command_unlock", cmd_res)
             except Exception as err:
-                _LOGGER.warning("Error in command_unlock: %s", err)
+                _log_unlock_call("command_unlock", err)
 
+        unlock_ok = False
+        if hasattr(self.api, "unlock"):
             try:
                 unlock_res = await self.api.unlock(
                     device_id=dev_str,
                     lock_id=str(lock_id),
+                    monitoring_device_number="1",
+                    home_id=home_id,
                 )
-                _LOGGER.debug("Monitoring unlock response: %s", unlock_res)
+                unlock_ok = _is_call_successful(unlock_res)
+                _log_unlock_call("unlock", unlock_res)
             except Exception as err:
-                _LOGGER.warning("Error in api.unlock: %s", err)
+                _log_unlock_call("unlock", err)
 
         if was_idle:
             pulse_duration = float(
@@ -730,6 +805,14 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             )
             await asyncio.sleep(max(1.5, pulse_duration))
             await self.async_hangup_call(device_id)
+
+        overall_success = command_unlock_ok or unlock_ok
+        return {
+            "command_unlock_ok": command_unlock_ok,
+            "unlock_ok": unlock_ok,
+            "skipped_reason": None if overall_success else "cloud_rejected",
+            "success": overall_success,
+        }
 
 
     def get_rtsp_url(self, device_id: int | str) -> Optional[str]:

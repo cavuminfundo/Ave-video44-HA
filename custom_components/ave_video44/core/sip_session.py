@@ -335,6 +335,8 @@ class CloudSipMediaSession:
         self._last_rtp_ts: float = 0.0
         self.is_active: bool = False
         self.remote_bye: bool = False
+        self.end_reason: Optional[str] = None
+        self._session_start_ts: float = 0.0
         self._mjpeg_last_log: float = 0.0
         self._mjpeg_last_seq: int = 0
         self._mjpeg_last_frame_ts: float = 0.0
@@ -820,8 +822,15 @@ class CloudSipMediaSession:
                 except Exception:
                     pass
 
-            if self._last_rtp_ts > 0 and (now - self._last_rtp_ts) > 10.0:
-                _LOGGER.debug("No RTP packets received for >10.0s, marking session inactive")
+            session_age = now - self._session_start_ts if self._session_start_ts > 0 else 0.0
+            rtp_gap = (now - self._last_rtp_ts) if self._last_rtp_ts > 0 else 0.0
+            if self._last_rtp_ts > 0 and (rtp_gap > 10.0 or (rtp_gap > 3.0 and session_age >= 25.0)):
+                _LOGGER.debug(
+                    "RTP timeout (gap=%.1fs, age=%.1fs), marking session inactive",
+                    rtp_gap,
+                    session_age,
+                )
+                self.end_reason = "rtp_timeout"
                 self.is_active = False
                 break
 
@@ -891,6 +900,7 @@ class CloudSipMediaSession:
                     )
                     if start_line.startswith("BYE "):
                         self.remote_bye = True
+                        self.end_reason = "remote_bye"
                         reason = headers.get("reason")
                         cseq_val = headers.get("cseq", "1 BYE")
                         useful_hdrs = [f"cseq={cseq_val}"]
@@ -997,9 +1007,9 @@ class CloudSipMediaSession:
             self._ffmpeg_port = s_ff.getsockname()[1]
             s_ff.close()
 
-            # Connect and REGISTER with retry once on timeout
+            # Connect and REGISTER with retry on timeout
             status_code = 0
-            for reg_attempt in range(2):
+            for reg_attempt in range(4):
                 try:
                     self._reader, self._writer = await asyncio.wait_for(
                         asyncio.open_connection(self._sip_domain, 5060), timeout=8.0
@@ -1009,13 +1019,13 @@ class CloudSipMediaSession:
                     self._writer.write(reg_pkt.encode("utf-8"))
                     await self._writer.drain()
 
-                    start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=6.0)
+                    start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=2.5)
                     status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
                     _LOGGER.debug("%s", self._format_sip_rx_debug("SIP REGISTER", start_line, headers))
                     break
                 except asyncio.TimeoutError:
-                    if reg_attempt == 0:
-                        _LOGGER.warning("Timeout waiting for initial REGISTER response, retrying in 1.5s...")
+                    if reg_attempt < 3:
+                        _LOGGER.warning("Timeout waiting for initial REGISTER response, retrying in 0.5s...")
                         if self._writer:
                             try:
                                 self._writer.close()
@@ -1025,7 +1035,7 @@ class CloudSipMediaSession:
                             self._writer = None
                         self._reader = None
                         self._rx_buf.clear()
-                        await asyncio.sleep(1.5)
+                        await asyncio.sleep(0.5)
                     else:
                         raise
 
@@ -1274,6 +1284,7 @@ class CloudSipMediaSession:
             )
 
             await asyncio.sleep(0.15)
+            self._session_start_ts = time.monotonic()
             self.is_active = True
 
             self._tasks.append(asyncio.create_task(self._ffmpeg_stdout_loop()))
@@ -1302,6 +1313,8 @@ class CloudSipMediaSession:
         if not had_opened:
             return
         self.is_active = False
+        if self.end_reason is None:
+            self.end_reason = "user"
 
         if self._stall_stop_event:
             self._stall_stop_event.set()
