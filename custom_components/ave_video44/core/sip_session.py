@@ -24,6 +24,8 @@ from .protocol import alaw_to_pcm16, pcm16_to_alaw
 
 _LOGGER = logging.getLogger(__name__)
 
+MJPEG_TARGET_FPS = 25
+
 
 class AveSipSession(asyncio.DatagramProtocol):
     """SIP session and full-duplex RTP audio engine for AVE Video V44."""
@@ -290,6 +292,7 @@ class AveSipSession(asyncio.DatagramProtocol):
 class CloudSipMediaSession:
     """SIP media session for AVE Cloud (TS-SMART 2-wire) H.264 SRTP video decoding."""
 
+    MJPEG_TARGET_FPS: int = MJPEG_TARGET_FPS
     _last_session_stop_ts: float = 0.0
 
     def __init__(
@@ -699,10 +702,12 @@ class CloudSipMediaSession:
                 self.is_active = False
                 break
 
+            had_pkts = False
             try:
                 while self._video_sock:
                     pkt, _ = self._video_sock.recvfrom(65535)
                     if pkt:
+                        had_pkts = True
                         video_rx_pkts += 1
                         video_rx_bytes += len(pkt)
                         self._last_rtp_ts = time.monotonic()
@@ -717,6 +722,7 @@ class CloudSipMediaSession:
                 while self._audio_sock:
                     pkt, _ = self._audio_sock.recvfrom(65535)
                     if pkt:
+                        had_pkts = True
                         audio_rx_pkts += 1
             except (BlockingIOError, InterruptedError):
                 pass
@@ -728,7 +734,10 @@ class CloudSipMediaSession:
                 _LOGGER.debug("video rx pkts=%d bytes=%d", video_rx_pkts, video_rx_bytes)
                 _LOGGER.debug("audio rx pkts=%d", audio_rx_pkts)
 
-            await asyncio.sleep(0.005)
+            if had_pkts:
+                await asyncio.sleep(0)
+            else:
+                await asyncio.sleep(0.002)
 
     async def _sip_rx_loop(self) -> None:
         """Read incoming SIP messages from TCP stream, handle remote BYE, detect connection loss."""
@@ -1080,7 +1089,7 @@ class CloudSipMediaSession:
                 "-flags", "low_delay",
                 "-protocol_whitelist", "file,udp,rtp,srtp,crypto",
                 "-i", self._sdp_path,
-                "-vf", "fps=15,scale=640:-1",
+                "-vf", f"fps={MJPEG_TARGET_FPS},scale=640:-1",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
                 "-q:v", "6",

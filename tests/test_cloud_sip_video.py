@@ -826,5 +826,65 @@ async def test_camera_notify_frame_read_called(mock_coordinator):
     mock_coordinator.notify_frame_read.assert_called_with(dev_id)
 
 
+@pytest.mark.asyncio
+async def test_cloud_sip_ffmpeg_target_fps_and_command():
+    """Verify CloudSipMediaSession uses MJPEG_TARGET_FPS = 25 and includes fps=25 in FFmpeg command."""
+    from custom_components.ave_video44.core.sip_session import (
+        CloudSipMediaSession,
+        MJPEG_TARGET_FPS,
+    )
+
+    assert MJPEG_TARGET_FPS == 25
+    assert CloudSipMediaSession.MJPEG_TARGET_FPS == 25
+
+    session = CloudSipMediaSession(
+        device_id="dev123",
+        sip_username="sip:user@test.com",
+        sip_password="pass",
+        target_sip_uri="sip:target@test.com",
+    )
+
+    sdp_200 = (
+        "v=0\r\n"
+        "c=IN IP4 51.144.180.20\r\n"
+        "m=audio 25000 RTP/SAVP 8\r\n"
+        "m=video 25002 RTP/SAVP 96\r\n"
+        "a=rtpmap:96 H264/90000\r\n"
+        "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:cmVtb3RldmlkZW9rZXkxMjM0NTY3ODkwMTIzNDU2\r\n"
+    )
+    sip_responses = [
+        ("SIP/2.0 200 OK", {"content-length": "0"}, ""),
+        ("SIP/2.0 200 OK", {"content-length": str(len(sdp_200)), "contact": "<sip:target@test.com>"}, sdp_200),
+    ]
+
+    async def _mock_read_sip_msg():
+        return sip_responses.pop(0)
+
+    session._read_sip_msg = _mock_read_sip_msg
+
+    mock_reader = AsyncMock()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock()
+    mock_writer.drain = AsyncMock()
+
+    with patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)), \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         patch.object(session, "wait_for_first_frame", return_value=b"frame"):
+        fake_proc = MagicMock()
+        fake_proc.stdout = AsyncMock()
+        mock_exec.return_value = fake_proc
+
+        started = await session.async_start()
+        assert started is True
+        mock_exec.assert_called_once()
+        cmd_args = mock_exec.call_args[0]
+        assert "-vf" in cmd_args
+        vf_idx = cmd_args.index("-vf")
+        vf_val = cmd_args[vf_idx + 1]
+        assert "fps=25" in vf_val
+        assert vf_val == f"fps={MJPEG_TARGET_FPS},scale=640:-1"
+        await session.async_stop()
+
+
 
 

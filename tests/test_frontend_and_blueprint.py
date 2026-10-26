@@ -347,6 +347,13 @@ def test_card_monitoring_hangup_and_clean_video():
     ), "Card logic must hide btnHangup when this._callState === 'monitoring'"
 
 
+def test_card_native_mjpeg_stream_and_no_frame_polling():
+    """Verify native MJPEG stream endpoint is used without setInterval polling."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    assert "camera_proxy_stream" in content
+    assert "setInterval(pollFrame" not in content
+
+
 # ---------------------------------------------------------------------------
 # Test Suite 3: Brand PNG Assets Validation
 # ---------------------------------------------------------------------------

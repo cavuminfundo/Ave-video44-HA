@@ -131,15 +131,15 @@ class AveVideo44Camera(AveVideo44BaseEntity, Camera):
                     while session.is_active:
                         if hasattr(self.coordinator, "notify_frame_read"):
                             self.coordinator.notify_frame_read(self.device_id)
-                        last_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.5)
-                        cur_frame = new_frame or session.latest_frame
-                        if cur_frame:
+                        next_seq, new_frame = await session.wait_for_next_frame(last_seq, timeout=0.5)
+                        if next_seq > last_seq and new_frame is not None:
+                            last_seq = next_seq
                             p_header = (
                                 f"--frameboundary\r\n"
                                 f"Content-Type: image/jpeg\r\n"
-                                f"Content-Length: {len(cur_frame)}\r\n\r\n"
+                                f"Content-Length: {len(new_frame)}\r\n\r\n"
                             ).encode("utf-8")
-                            p = p_header + cur_frame + b"\r\n"
+                            p = p_header + new_frame + b"\r\n"
                             await response.write(p)
                     return response
                 except (ConnectionResetError, asyncio.CancelledError):

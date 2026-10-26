@@ -16,6 +16,24 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.10 — 2026-10-26
+
+### 🇬🇧 English
+
+- **High-Performance 25 FPS Video & Real-Time MJPEG Streaming**:
+  - Upgraded video target rate from 15 FPS to 25 FPS (`MJPEG_TARGET_FPS = 25`) in FFmpeg video filter pipeline.
+  - Intercom card switches to native Home Assistant MJPEG video stream (`camera_proxy_stream`) during active calls and monitoring instead of snapshot polling.
+  - Ultra-responsive UDP relay loop: yields immediately (`asyncio.sleep(0)`) when RTP video packets arrive and applies minimal backoff only when socket is empty, eliminating artificial forwarding latency.
+  - Server-side MJPEG stream deduplication: guarantees each decoded frame is served exactly once (`next_seq > last_seq`), preventing stale duplicate frames during stream timeouts.
+
+### 🇮🇹 Italiano
+
+- **Video ad Alte Prestazioni a 25 FPS e Streaming MJPEG Nativo**:
+  - Incrementato il frame rate video da 15 a 25 FPS (`MJPEG_TARGET_FPS = 25`) nella pipeline di decodifica FFmpeg.
+  - Card citofonica aggiornata per usare lo stream MJPEG nativo di Home Assistant (`camera_proxy_stream`) durante chiamate e monitoraggio attivo al posto del polling snapshot.
+  - Loop di relay UDP ad alta reattività: yield immediato (`asyncio.sleep(0)`) alla ricezione di pacchetti RTP video e backoff minimo solo a socket vuoto, eliminando latenze artificiali di inoltro.
+  - Deduplicazione frame nello stream MJPEG: ogni nuovo frame decodificato viene servito una sola volta (`next_seq > last_seq`), prevenendo l'invio di frame duplicati o obsoleti sui timeout.
+
 ## v1.2.9 — 2026-10-26
 
 ### 🇬🇧 English
