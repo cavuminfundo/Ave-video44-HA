@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import time
 from typing import Any, Dict, Optional
 import voluptuous as vol
 
@@ -12,6 +13,8 @@ from .const import DOMAIN
 from .coordinator import AveVideo44Coordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+_AUDIO_TX_SESSIONS: Dict[Any, Dict[str, Any]] = {}
 
 
 def _get_coordinator(
@@ -91,8 +94,48 @@ async def ws_audio_tx(
 ) -> None:
     """Receive PCM16 audio from Lovelace card and send to RTP engine."""
     coordinator = _get_coordinator(hass, msg.get("entry_id"), msg.get("device_id"))
+    device_id = msg.get("device_id")
     try:
         pcm16_data = base64.b64decode(msg["payload"])
+        now = time.monotonic()
+        session_key = (id(connection), str(device_id))
+        stats = _AUDIO_TX_SESSIONS.get(session_key)
+        if not stats or (now - stats["last_active"] > 5.0):
+            _LOGGER.debug(
+                "audio_tx first frame device=%s bytes=%d",
+                device_id,
+                len(pcm16_data),
+            )
+            stats = {
+                "frames": 1,
+                "bytes": len(pcm16_data),
+                "last_log": now,
+                "last_frames": 0,
+                "last_active": now,
+            }
+            _AUDIO_TX_SESSIONS[session_key] = stats
+        else:
+            stats["frames"] += 1
+            stats["bytes"] += len(pcm16_data)
+            stats["last_active"] = now
+            if now - stats["last_log"] >= 5.0:
+                elapsed = now - stats["last_log"]
+                rate = (stats["frames"] - stats["last_frames"]) / elapsed if elapsed > 0 else 0.0
+                _LOGGER.debug(
+                    "audio_tx device=%s frames=%d bytes=%d rate=%.1f fps",
+                    device_id,
+                    stats["frames"],
+                    stats["bytes"],
+                    rate,
+                )
+                stats["last_log"] = now
+                stats["last_frames"] = stats["frames"]
+
+        if len(_AUDIO_TX_SESSIONS) > 32:
+            stale = [k for k, v in _AUDIO_TX_SESSIONS.items() if now - v.get("last_active", 0.0) > 30.0]
+            for k in stale:
+                _AUDIO_TX_SESSIONS.pop(k, None)
+
         coordinator.sip_session.send_pcm16_frame(pcm16_data)
         connection.send_result(msg["id"], {"success": True})
     except Exception as err:
@@ -113,9 +156,33 @@ async def ws_audio_subscribe(
 ) -> None:
     """Subscribe to incoming decoded PCM16 audio frames."""
     coordinator = _get_coordinator(hass, msg.get("entry_id"), msg.get("device_id"))
+    device_id = msg.get("device_id")
+    _LOGGER.debug("audio_subscribe registered device=%s", device_id)
+
+    rx_frames = 0
+    rx_bytes = 0
+    last_log_time = time.monotonic()
+    last_log_frames = 0
 
     @callback
     def _audio_rx_callback(pcm16_frame: bytes) -> None:
+        nonlocal rx_frames, rx_bytes, last_log_time, last_log_frames
+        rx_frames += 1
+        rx_bytes += len(pcm16_frame)
+        now = time.monotonic()
+        if now - last_log_time >= 5.0:
+            elapsed = now - last_log_time
+            rate = (rx_frames - last_log_frames) / elapsed if elapsed > 0 else 0.0
+            _LOGGER.debug(
+                "audio_subscribe device=%s frames=%d bytes=%d rate=%.1f fps",
+                device_id,
+                rx_frames,
+                rx_bytes,
+                rate,
+            )
+            last_log_time = now
+            last_log_frames = rx_frames
+
         b64_payload = base64.b64encode(pcm16_frame).decode("ascii")
         connection.send_event(msg["id"], {"payload": b64_payload})
 

@@ -47,6 +47,9 @@ class AveSipSession(asyncio.DatagramProtocol):
         self._timestamp = 0
         self._ssrc = 0x12345678
         self.is_closed = False
+        self._tx_queued_count = 0
+        self._tx_sent_count = 0
+        self._tx_last_log_time = 0.0
 
     @property
     def audio_tx_queue_size(self) -> int:
@@ -81,6 +84,7 @@ class AveSipSession(asyncio.DatagramProtocol):
             return
 
         self._audio_tx_queue.append(frame)
+        self._tx_queued_count += 1
 
         if self._transport and self._remote_rtp_addr:
             alaw = pcm16_to_alaw(frame)
@@ -96,8 +100,20 @@ class AveSipSession(asyncio.DatagramProtocol):
             self._timestamp += len(alaw)
             try:
                 self._transport.sendto(rtp_header + alaw, self._remote_rtp_addr)
+                self._tx_sent_count += 1
             except Exception as err:
                 _LOGGER.error("Failed to send RTP datagram: %s", err)
+
+        now = time.monotonic()
+        if self._tx_last_log_time == 0.0:
+            self._tx_last_log_time = now
+        elif now - self._tx_last_log_time >= 5.0:
+            self._tx_last_log_time = now
+            _LOGGER.debug(
+                "audio tx queued=%d sent=%d",
+                self._tx_queued_count,
+                self._tx_sent_count,
+            )
 
     def handle_rtp_packet(self, data: bytes) -> None:
         """Process incoming RTP packet, decode PCMA payload to PCM16."""
@@ -315,6 +331,8 @@ class CloudSipMediaSession:
         self._sip_connected_event = asyncio.Event()
         self._last_rtp_ts: float = 0.0
         self.is_active: bool = False
+        self._mjpeg_last_log: float = 0.0
+        self._mjpeg_last_seq: int = 0
 
         self._mjpeg_buf = bytearray()
         self._rx_buf = bytearray()
@@ -394,6 +412,7 @@ class CloudSipMediaSession:
             "remote_ip": "",
             "remote_audio_port": 0,
             "remote_video_port": 0,
+            "audio_payload_type": None,
             "crypto_suite": "AES_CM_128_HMAC_SHA1_80",
             "crypto_key": "",
             "video_fmtp": "",
@@ -410,6 +429,12 @@ class CloudSipMediaSession:
                 parts = line.split()
                 if len(parts) > 1 and parts[1].isdigit():
                     res["remote_audio_port"] = int(parts[1])
+                if len(parts) > 3 and not res.get("audio_payload_type"):
+                    res["audio_payload_type"] = parts[3]
+            elif line.startswith("a=rtpmap:") and current_media == "audio":
+                rtp_parts = line.split("a=rtpmap:", 1)[1].strip().split()
+                if rtp_parts and not res.get("audio_payload_type"):
+                    res["audio_payload_type"] = rtp_parts[0]
             elif line.startswith("m=video "):
                 current_media = "video"
                 parts = line.split()
@@ -563,6 +588,17 @@ class CloudSipMediaSession:
             self._first_frame_event.set()
             self._frame_event.set()
 
+            now = time.monotonic()
+            if self._mjpeg_last_log == 0.0:
+                self._mjpeg_last_log = now
+                self._mjpeg_last_seq = self.frame_seq
+            elif now - self._mjpeg_last_log >= 5.0:
+                elapsed = now - self._mjpeg_last_log
+                fps = (self.frame_seq - self._mjpeg_last_seq) / elapsed if elapsed > 0 else 0.0
+                _LOGGER.debug("mjpeg frames=%d fps=%.1f", self.frame_seq, fps)
+                self._mjpeg_last_log = now
+                self._mjpeg_last_seq = self.frame_seq
+
     async def wait_for_first_frame(self, timeout: float = 6.0) -> Optional[bytes]:
         """Wait until the first JPEG frame is decoded."""
         if self.latest_frame is not None:
@@ -640,6 +676,10 @@ class CloudSipMediaSession:
         """NAT-punching keepalive and inbound SRTP to FFmpeg loop."""
         dummy_rtp = b"\x80\x60\x00\x01\x00\x00\x00\x00\x12\x34\x56\x78"
         last_punch = 0.0
+        video_rx_pkts = 0
+        video_rx_bytes = 0
+        audio_rx_pkts = 0
+        last_stats_log = time.monotonic()
         while self.is_active:
             now = time.monotonic()
             if now - last_punch >= 0.4:
@@ -663,6 +703,8 @@ class CloudSipMediaSession:
                 while self._video_sock:
                     pkt, _ = self._video_sock.recvfrom(65535)
                     if pkt:
+                        video_rx_pkts += 1
+                        video_rx_bytes += len(pkt)
                         self._last_rtp_ts = time.monotonic()
                         if self._ffmpeg_port:
                             self._video_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_port))
@@ -670,6 +712,22 @@ class CloudSipMediaSession:
                 pass
             except Exception:
                 pass
+
+            try:
+                while self._audio_sock:
+                    pkt, _ = self._audio_sock.recvfrom(65535)
+                    if pkt:
+                        audio_rx_pkts += 1
+            except (BlockingIOError, InterruptedError):
+                pass
+            except Exception:
+                pass
+
+            if now - last_stats_log >= 5.0:
+                last_stats_log = now
+                _LOGGER.debug("video rx pkts=%d bytes=%d", video_rx_pkts, video_rx_bytes)
+                _LOGGER.debug("audio rx pkts=%d", audio_rx_pkts)
+
             await asyncio.sleep(0.005)
 
     async def _sip_rx_loop(self) -> None:
@@ -684,7 +742,18 @@ class CloudSipMediaSession:
                         self._read_sip_msg(), timeout=2.0
                     )
                     if start_line.startswith("BYE "):
-                        _LOGGER.debug("Received remote SIP BYE: %s, sending 200 OK", start_line)
+                        reason = headers.get("reason")
+                        cseq_val = headers.get("cseq", "1 BYE")
+                        useful_hdrs = [f"cseq={cseq_val}"]
+                        if reason:
+                            useful_hdrs.append(f"reason={reason}")
+                        if "user-agent" in headers:
+                            useful_hdrs.append(f"user-agent={headers['user-agent']}")
+                        _LOGGER.debug(
+                            "Received remote SIP BYE: %s (%s), sending 200 OK",
+                            start_line,
+                            ", ".join(useful_hdrs),
+                        )
                         if self._writer:
                             cseq_val = headers.get("cseq", "1 BYE")
                             call_id_val = headers.get("call-id", self._call_id or "")
@@ -975,6 +1044,16 @@ class CloudSipMediaSession:
             remote_ip = parsed_sdp["remote_ip"] or self._sip_domain
             remote_video_port = parsed_sdp["remote_video_port"]
             remote_audio_port = parsed_sdp["remote_audio_port"]
+            _LOGGER.debug(
+                "SIP media session started: local audio_port=%d video_port=%d, "
+                "remote ip=%s audio_remote_port=%d video_remote_port=%d, negotiated_audio_pt=%s",
+                audio_port,
+                video_port,
+                remote_ip,
+                remote_audio_port,
+                remote_video_port,
+                parsed_sdp.get("audio_payload_type"),
+            )
 
             self._sdp_path = f"/tmp/ave_video44_{self.device_id}.sdp"
             sdp_content = self._generate_local_sdp(

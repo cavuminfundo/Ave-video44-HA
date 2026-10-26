@@ -16,6 +16,28 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.2.9 — 2026-10-26
+
+### 🇬🇧 English
+
+- **Media & Signaling Diagnostic Debug Telemetry**:
+  - Added low-frequency, non-invasive `_LOGGER.debug` counters (every 5 seconds) for inbound SRTP video packets and byte rates.
+  - Added real-time MJPEG frame counter and instantaneous FPS rate logging in the frame extractor loop.
+  - Added audio RX packet counter logging and audio TX queued vs. sent metrics in SIP session and WebSocket streaming APIs.
+  - Added session startup diagnostics for local and remote audio/video ports and negotiated SDP audio payload types.
+  - Enhanced remote SIP `BYE` handling with safe header diagnostics (such as `Reason`, `CSeq`, `User-Agent`) without credentials or sensitive data.
+  - No functional changes.
+
+### 🇮🇹 Italiano
+
+- **Diagnostica e Telemetria Debug per Flussi Multimediali e Segnalazione**:
+  - Aggiunti contatori diagnostici `_LOGGER.debug` a bassa frequenza (ogni 5 secondi) per pacchetti e byte SRTP video in ingresso.
+  - Aggiunto conteggio frame JPEG estratti con calcolo del rate FPS istantaneo nel loop di decodifica MJPEG.
+  - Aggiunto conteggio pacchetti audio RX e tracciamento frame TX accodati rispetto a trasmessi nella sessione SIP e nelle API WebSocket audio.
+  - Aggiunti log di avvio sessione con porte locali/remote audio e video e payload type SDP audio negoziato.
+  - Migliorato il tracciamento dei messaggi SIP `BYE` remoti registrando gli header informativi (`Reason`, `CSeq`, `User-Agent`) senza esporre credenziali o dati sensibili.
+  - Nessuna variazione funzionale.
+
 ## v1.2.8 — 2026-10-25
 
 ### 🇬🇧 English
