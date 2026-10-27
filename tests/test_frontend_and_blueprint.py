@@ -501,9 +501,79 @@ def test_card_audio_tx_20ms_accumulator():
     assert "ave_video44/audio_tx" in tx_fn
 
 
-def test_card_version_bumped_1_3_0():
-    """Verify CARD_VERSION constant is bumped to 1.3.0."""
+def test_card_version_bumped_1_3_1():
+    """Verify CARD_VERSION constant is bumped to 1.3.1."""
     content = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.0";' in content
+    assert 'const CARD_VERSION = "1.3.1";' in content
+
+
+# ---------------------------------------------------------------------------
+# Test Suite 7: Dynamic Audio/Mute Button Semantics in Monitoring & Talking
+# ---------------------------------------------------------------------------
+
+
+def test_card_dynamic_audio_button_states():
+    """Verify _updateDynamicContent manages #btnMute across ringing, monitoring, and talking states."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    body = _extract_js_method(content, "_updateDynamicContent")
+
+    assert "btnMute" in body, "_updateDynamicContent must manage btnMute element"
+
+    # Ringing state: hidden during incoming ring
+    assert 'btnMute.classList.add("hidden")' in body or "btnMute.classList.add('hidden')" in body, (
+        "btnMute must be hidden during ringing state"
+    )
+
+    # Monitoring state with mic inactive: prompt to activate audio
+    assert "Attiva audio" in body, (
+        "btnMute label must be 'Attiva audio' in monitoring when mic is not active"
+    )
+    assert "mdi:microphone-outline" in body, (
+        "btnMute icon must use outline variant when mic is inactive during monitoring"
+    )
+
+    # Talking state or mic active: default mute control
+    assert '"Muto"' in body or "'Muto'" in body, (
+        "btnMute label must be 'Muto' when audio is active"
+    )
+    assert "mdi:microphone" in body, (
+        "btnMute icon must be mdi:microphone when mic is active"
+    )
+
+
+def test_card_monitoring_activate_audio_tx():
+    """Verify _toggleMute activates audio TX when called in monitoring mode without active mic."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    mute_fn = _extract_js_method(content, "_toggleMute")
+
+    # Guard for monitoring state and absent media stream
+    assert "monitoring" in mute_fn, (
+        "_toggleMute must check for monitoring state"
+    )
+    assert "this._mediaStream" in mute_fn, (
+        "_toggleMute must check this._mediaStream presence"
+    )
+
+    # Audio TX activation
+    assert "this._startAudioTx()" in mute_fn, (
+        "_toggleMute must invoke this._startAudioTx() when mic is not yet active"
+    )
+
+    # Button transition to active mute state
+    assert "Muto" in mute_fn, (
+        "_toggleMute must switch label to 'Muto' upon activation"
+    )
+    assert "mdi:microphone" in mute_fn, (
+        "_toggleMute must switch icon to mdi:microphone upon activation"
+    )
+
+    # Error handling fallback
+    assert "Microfono assente" in mute_fn, (
+        "_toggleMute must handle mic failure with 'Microfono assente' label"
+    )
+    assert "btnMute.disabled = true" in mute_fn or "disabled = true" in mute_fn, (
+        "_toggleMute must disable btnMute if mic capture fails"
+    )
+
 
 

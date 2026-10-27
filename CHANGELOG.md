@@ -16,6 +16,20 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.1 — 2026-10-27
+
+### 🇬🇧 English
+- **Dynamic Audio Button (Monitoring & Call UX)**:
+  - In video-only mode ("Attiva Video"), the audio button displays **"Attiva audio"** with `mdi:microphone-outline`. Clicking it dynamically activates the device microphone (`_startAudioTx`), enabling two-way conversation with the outdoor station without opening a formal call.
+  - Once audio transmission is active, the button seamlessly transforms into **"Muto"** (`mdi:microphone`), allowing full-duplex mute/unmute control.
+  - During incoming call ringing, the audio button is gracefully hidden (only Answer and Reject are visible).
+
+### 🇮🇹 Italiano
+- **Pulsante Audio Dinamico (UX Monitoraggio e Chiamata)**:
+  - In modalità solo video ("Attiva Video"), il pulsante audio mostra **"Attiva audio"** con icona `mdi:microphone-outline`. Cliccandoci sopra viene attivato istantaneamente il microfono (`_startAudioTx`), permettendo di parlare verso il posto esterno senza necessità di avviare una chiamata formale.
+  - Una volta attivato il parlato, il pulsante commuta automaticamente in **"Muto"** (`mdi:microphone`), permettendo di silenziare o riattivare la propria voce.
+  - Durante lo squillo di una chiamata in arrivo, il pulsante audio viene opportunamente nascosto (lasciando visibili solo "Rispondi" e "Rifiuta").
+
 ## v1.3.0 — 2026-10-26
 
 ### 🇬🇧 English

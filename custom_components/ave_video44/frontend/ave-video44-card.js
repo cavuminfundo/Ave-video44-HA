@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.0";
+const CARD_VERSION = "1.3.1";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -696,6 +696,26 @@ class AveVideo44Card extends HTMLElement {
         }
       }
     }
+
+    const btnMute = shadow.getElementById("btnMute");
+    const muteIcon = shadow.getElementById("muteIcon");
+    const muteLabel = shadow.getElementById("muteLabel");
+    if (btnMute) {
+      if (this._callState === "ringing") {
+        btnMute.classList.add("hidden");
+      } else {
+        btnMute.classList.remove("hidden");
+        if (this._callState === "monitoring" && !this._mediaStream) {
+          if (muteIcon) muteIcon.setAttribute("icon", "mdi:microphone-outline");
+          if (muteLabel) muteLabel.textContent = "Attiva audio";
+          btnMute.setAttribute("aria-label", "Attiva microfono per parlare");
+        } else {
+          if (muteIcon) muteIcon.setAttribute("icon", this._isMuted ? "mdi:microphone-off" : "mdi:microphone");
+          if (muteLabel) muteLabel.textContent = this._isMuted ? "Muto attivo" : "Muto";
+          btnMute.setAttribute("aria-label", "Attiva o disattiva microfono");
+        }
+      }
+    }
   }
 
   _stopFramePolling() {
@@ -985,11 +1005,30 @@ class AveVideo44Card extends HTMLElement {
     }
   }
 
-  _toggleMute() {
-    this._isMuted = !this._isMuted;
+  async _toggleMute() {
     const shadow = this.shadowRoot;
-    const muteIcon = shadow.getElementById("muteIcon");
-    const muteLabel = shadow.getElementById("muteLabel");
+    const btnMute = shadow ? shadow.getElementById("btnMute") : null;
+    const muteIcon = shadow ? shadow.getElementById("muteIcon") : null;
+    const muteLabel = shadow ? shadow.getElementById("muteLabel") : null;
+
+    if (this._callState === "monitoring" && !this._mediaStream) {
+      try {
+        await this._startAudioTx();
+        this._isMuted = false;
+        if (muteIcon) muteIcon.setAttribute("icon", "mdi:microphone");
+        if (muteLabel) muteLabel.textContent = "Muto";
+        if (btnMute) btnMute.setAttribute("aria-label", "Attiva o disattiva microfono");
+        this._showFeedback("Microfono attivo: puoi parlare con l'esterno", "info");
+      } catch (err) {
+        console.warn("[AVE V44] Microphone unavailable in monitoring:", err);
+        if (btnMute) btnMute.disabled = true;
+        if (muteLabel) muteLabel.textContent = "Microfono assente";
+        this._showFeedback("Microfono non rilevato: modalità solo ascolto attiva", "warning");
+      }
+      return;
+    }
+
+    this._isMuted = !this._isMuted;
 
     if (this._mediaStream) {
       this._mediaStream.getAudioTracks().forEach((track) => {
@@ -998,11 +1037,11 @@ class AveVideo44Card extends HTMLElement {
     }
 
     if (this._isMuted) {
-      muteIcon.setAttribute("icon", "mdi:microphone-off");
-      muteLabel.textContent = "Muto attivo";
+      if (muteIcon) muteIcon.setAttribute("icon", "mdi:microphone-off");
+      if (muteLabel) muteLabel.textContent = "Muto attivo";
     } else {
-      muteIcon.setAttribute("icon", "mdi:microphone");
-      muteLabel.textContent = "Muto";
+      if (muteIcon) muteIcon.setAttribute("icon", "mdi:microphone");
+      if (muteLabel) muteLabel.textContent = "Muto";
     }
   }
 
@@ -1247,8 +1286,13 @@ class AveVideo44Card extends HTMLElement {
     }
     const shadow = this.shadowRoot;
     const btnMute = shadow ? shadow.getElementById("btnMute") : null;
+    const muteIcon = shadow ? shadow.getElementById("muteIcon") : null;
     const muteLabel = shadow ? shadow.getElementById("muteLabel") : null;
-    if (btnMute) btnMute.disabled = false;
+    if (btnMute) {
+      btnMute.disabled = false;
+      btnMute.setAttribute("aria-label", "Attiva o disattiva microfono");
+    }
+    if (muteIcon) muteIcon.setAttribute("icon", "mdi:microphone");
     if (muteLabel) muteLabel.textContent = "Muto";
     this._txAccumulator = [];
     this._nextScheduledPlayTime = 0.0;
