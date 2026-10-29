@@ -606,6 +606,7 @@ class CloudSipMediaSession:
             "remote_ip": "",
             "remote_audio_port": 0,
             "remote_video_port": 0,
+            "audio_proto": "RTP/SAVP",
             "audio_payload_type": None,
             "crypto_suite": "AES_CM_128_HMAC_SHA1_80",
             "crypto_key": "",
@@ -625,6 +626,8 @@ class CloudSipMediaSession:
                 parts = line.split()
                 if len(parts) > 1 and parts[1].isdigit():
                     res["remote_audio_port"] = int(parts[1])
+                if len(parts) > 2:
+                    res["audio_proto"] = parts[2].strip().upper()
                 if len(parts) > 3 and not res.get("audio_payload_type"):
                     res["audio_payload_type"] = parts[3]
             elif line.startswith("a=rtpmap:") and current_media == "audio":
@@ -687,17 +690,19 @@ class CloudSipMediaSession:
         """Generate SDP descriptor file for local FFmpeg audio listener."""
         pt = str(payload_type) if payload_type is not None else "0"
         codec_name = "PCMA" if pt == "8" else "PCMU"
+        proto = "RTP/SAVP" if crypto_key else "RTP/AVP"
         lines = [
             "v=0",
             "o=- 0 0 IN IP4 127.0.0.1",
             "s=AVE Audio",
             "c=IN IP4 127.0.0.1",
             "t=0 0",
-            f"m=audio {ffmpeg_audio_port} RTP/SAVP {pt}",
+            f"m=audio {ffmpeg_audio_port} {proto} {pt}",
             f"a=rtpmap:{pt} {codec_name}/8000",
-            f"a=crypto:1 {crypto_suite} inline:{crypto_key}",
-            "",
         ]
+        if crypto_key:
+            lines.append(f"a=crypto:1 {crypto_suite} inline:{crypto_key}")
+        lines.append("")
         return "\r\n".join(lines)
 
     @staticmethod
@@ -988,6 +993,11 @@ class CloudSipMediaSession:
             "-ar", "8000",
             "pipe:1",
         ]
+        safe_audio_cmd = [
+            "[REDACTED]" if any(k in arg.lower() for k in ("password", "token", "inline:", "secret", "key=")) else arg
+            for arg in audio_cmd
+        ]
+        _LOGGER.debug("FFmpeg audio spawn command: %s", " ".join(safe_audio_cmd))
         self._ffmpeg_audio_proc = await asyncio.create_subprocess_exec(
             *audio_cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -1119,8 +1129,6 @@ class CloudSipMediaSession:
                         self._video_sock.sendto(dummy_rtp, (remote_ip, remote_video_port))
                     if self._rtcp_sock and remote_video_port:
                         self._rtcp_sock.sendto(dummy_rtp, (remote_ip, remote_video_port + 1))
-                    if self._audio_sock and remote_audio_port:
-                        self._audio_sock.sendto(dummy_rtp, (remote_ip, remote_audio_port))
                 except Exception:
                     pass
 
@@ -1554,14 +1562,19 @@ class CloudSipMediaSession:
             await self._async_write_sdp_file(self._sdp_path, sdp_content)
 
             callee_audio_key = parsed_sdp.get("callee_audio_key")
-            if self.enable_audio and self._ffmpeg_audio_port and callee_audio_key:
+            audio_proto = parsed_sdp.get("audio_proto", "RTP/SAVP")
+            if (
+                self.enable_audio
+                and self._ffmpeg_audio_port
+                and (callee_audio_key or audio_proto == "RTP/AVP")
+            ):
                 callee_audio_suite = parsed_sdp.get("callee_audio_suite") or "AES_CM_128_HMAC_SHA1_80"
                 audio_pt = parsed_sdp.get("audio_payload_type") or "0"
                 self._audio_sdp_path = f"/tmp/ave_video44_audio_{self.device_id}_{uuid.uuid4().hex[:6]}.sdp"
                 audio_sdp_content = self._generate_audio_sdp(
                     ffmpeg_audio_port=self._ffmpeg_audio_port,
                     crypto_suite=callee_audio_suite,
-                    crypto_key=callee_audio_key,
+                    crypto_key=callee_audio_key or "",
                     payload_type=audio_pt,
                 )
                 await self._async_write_sdp_file(self._audio_sdp_path, audio_sdp_content)
@@ -1582,7 +1595,7 @@ class CloudSipMediaSession:
                 "-fps_mode", "passthrough",
                 "-f", "image2pipe",
                 "-vcodec", "mjpeg",
-                "-q:v", "6",
+                "-q:v", "2",
                 "-",
             ]
             safe_cmd = [

@@ -314,7 +314,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                         device_id,
                         monitoring_device_number=mon_num,
                         action=1,
-                        resolution_level=0,
+                        resolution_level=1,
                     )
                 except Exception as err:
                     _LOGGER.error("Failed to start camera monitoring on API: %s", err)
@@ -565,6 +565,9 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             return None
 
         old_sess = self.cloud_sip_sessions.get(dev_str)
+        if old_sess and hasattr(old_sess, "_rx_pcm16_callbacks") and hasattr(new_session, "add_rx_pcm16_callback"):
+            for cb in list(old_sess._rx_pcm16_callbacks):
+                new_session.add_rx_pcm16_callback(cb)
         self.cloud_sip_sessions[dev_str] = new_session
         self.notify_frame_read(dev_str)
 

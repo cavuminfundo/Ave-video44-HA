@@ -3,7 +3,7 @@
 import asyncio
 import os
 import stat
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -241,4 +241,204 @@ def test_cloud_sip_media_session_tx_disabled_when_kill_switch_active():
     session.send_pcm16_frame(frame)
 
     session._audio_sock.sendto.assert_not_called()
+
+
+def test_cloud_sip_media_session_generate_audio_sdp_plain_rtp():
+    """Verify _generate_audio_sdp emits RTP/AVP without a=crypto when crypto_key is empty."""
+    session = CloudSipMediaSession(
+        device_id="101",
+        sip_username="sip:test@domain.com",
+        sip_password="dummy_password",
+        target_sip_uri="sip:target@domain.com",
+    )
+    sdp_text = session._generate_audio_sdp(
+        ffmpeg_audio_port=12344,
+        crypto_suite="",
+        crypto_key="",
+        payload_type=0,
+    )
+    assert "m=audio 12344 RTP/AVP 0" in sdp_text
+    assert "a=crypto:" not in sdp_text
+    assert "a=rtpmap:0 PCMU/8000" in sdp_text
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_audio_keepalive_payload_type():
+    """Verify _udp_relay_loop does not transmit H.264 video RTP packets on the remote audio socket."""
+    session = CloudSipMediaSession(
+        device_id="101",
+        sip_username="sip:test@domain.com",
+        sip_password="dummy_password",
+        target_sip_uri="sip:target@domain.com",
+    )
+    session.is_active = True
+    session._audio_payload_type = 0
+    mock_audio_sock = MagicMock()
+    session._audio_sock = mock_audio_sock
+    session._video_sock = None
+    session._rtcp_sock = None
+
+    relay_task = asyncio.create_task(
+        session._udp_relay_loop("192.168.1.50", 10006, 10004)
+    )
+    await asyncio.sleep(0.01)
+    session.is_active = False
+    await relay_task
+
+    sent_audio_packets = [call[0][0] for call in mock_audio_sock.sendto.call_args_list]
+    for packet in sent_audio_packets:
+        payload_type = packet[1] & 0x7F
+        assert payload_type != 96, "Audio keepalive must not use H.264 video payload type (96)"
+        assert payload_type in (0, 8, 13), f"Expected audio payload type, got {payload_type}"
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_ffmpeg_audio_spawn_plain_rtp():
+    """Verify async_start spawns FFmpeg audio subprocess when callee_audio_key is empty or absent."""
+    session = CloudSipMediaSession(
+        device_id="101",
+        sip_username="sip:test@domain.com",
+        sip_password="dummy_password",
+        target_sip_uri="sip:target@domain.com",
+        enable_audio=True,
+    )
+    sdp_200 = (
+        "v=0\r\n"
+        "c=IN IP4 51.144.180.20\r\n"
+        "m=audio 25000 RTP/AVP 0\r\n"
+        "a=rtpmap:0 PCMU/8000\r\n"
+        "m=video 25002 RTP/SAVP 96\r\n"
+        "a=rtpmap:96 H264/90000\r\n"
+        "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:cmVtb3RldmlkZW9rZXkxMjM0NTY3ODkwMTIzNDU2\r\n"
+    )
+    sip_responses = [
+        ("SIP/2.0 200 OK", {"content-length": "0"}, ""),
+        ("SIP/2.0 200 OK", {"content-length": str(len(sdp_200)), "contact": "<sip:target@domain.com>"}, sdp_200),
+    ]
+
+    async def _mock_read_sip_msg():
+        return sip_responses.pop(0)
+
+    session._read_sip_msg = _mock_read_sip_msg
+
+    mock_reader = AsyncMock()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock()
+    mock_writer.drain = AsyncMock()
+    mock_writer.wait_closed = AsyncMock()
+
+    with patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)), \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         patch.object(session, "wait_for_first_frame", return_value=b"frame"):
+        fake_proc = MagicMock()
+        fake_proc.stdout = AsyncMock()
+        fake_proc.stdout.read = AsyncMock(return_value=b"")
+        fake_proc.stdout.readexactly = AsyncMock(
+            side_effect=asyncio.IncompleteReadError(partial=b"", expected=320)
+        )
+        fake_proc.wait = AsyncMock(return_value=0)
+        mock_exec.return_value = fake_proc
+
+        started = await session.async_start()
+        assert started is True
+        assert session._ffmpeg_audio_proc is not None
+        await session.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_cloud_sip_media_session_mjpeg_high_quality_qscale():
+    """Verify async_start uses -q:v 2 for crisp JPEG definition and sharp edge quality."""
+    session = CloudSipMediaSession(
+        device_id="101",
+        sip_username="sip:test@domain.com",
+        sip_password="dummy_password",
+        target_sip_uri="sip:target@domain.com",
+    )
+    sdp_200 = (
+        "v=0\r\n"
+        "c=IN IP4 51.144.180.20\r\n"
+        "m=audio 25000 RTP/SAVP 0\r\n"
+        "m=video 25002 RTP/SAVP 96\r\n"
+        "a=rtpmap:96 H264/90000\r\n"
+        "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:cmVtb3RldmlkZW9rZXkxMjM0NTY3ODkwMTIzNDU2\r\n"
+    )
+    sip_responses = [
+        ("SIP/2.0 200 OK", {"content-length": "0"}, ""),
+        ("SIP/2.0 200 OK", {"content-length": str(len(sdp_200)), "contact": "<sip:target@domain.com>"}, sdp_200),
+    ]
+
+    async def _mock_read_sip_msg():
+        return sip_responses.pop(0)
+
+    session._read_sip_msg = _mock_read_sip_msg
+
+    mock_reader = AsyncMock()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock()
+    mock_writer.drain = AsyncMock()
+    mock_writer.wait_closed = AsyncMock()
+
+    with patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)), \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         patch.object(session, "wait_for_first_frame", return_value=b"frame"):
+        fake_proc = MagicMock()
+        fake_proc.stdout = AsyncMock()
+        fake_proc.stdout.read = AsyncMock(return_value=b"")
+        fake_proc.stdout.readexactly = AsyncMock(
+            side_effect=asyncio.IncompleteReadError(partial=b"", expected=320)
+        )
+        fake_proc.wait = AsyncMock(return_value=0)
+        mock_exec.return_value = fake_proc
+
+        started = await session.async_start()
+        assert started is True
+
+        video_cmd_args = None
+        for call_item in mock_exec.call_args_list:
+            args = call_item[0]
+            if "-q:v" in args:
+                video_cmd_args = args
+                break
+
+        assert video_cmd_args is not None
+        qv_idx = video_cmd_args.index("-q:v")
+        assert video_cmd_args[qv_idx + 1] == "2"
+        await session.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_commit_session_preserves_rx_callbacks(mock_coordinator):
+    """Verify async_commit_session transfers registered audio RX callbacks from old to new session."""
+    callback_fn = MagicMock()
+    old_sess = MagicMock()
+    old_sess._rx_pcm16_callbacks = {callback_fn}
+    old_sess.async_stop = AsyncMock()
+
+    mock_coordinator.cloud_sip_sessions["101"] = old_sess
+
+    new_sess = MagicMock()
+    new_sess.is_active = False
+    new_sess.add_rx_pcm16_callback = MagicMock()
+
+    await mock_coordinator.async_commit_session("101", new_sess)
+
+    new_sess.add_rx_pcm16_callback.assert_called_with(callback_fn)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_wake_camera_requests_hd_resolution(mock_coordinator):
+    """Verify async_wake_camera requests HD stream (resolution_level=1) from cloud monitoring API."""
+    mock_coordinator.api.control_monitoring = AsyncMock(return_value="call123")
+    mock_coordinator.api.get_rtsp_config = AsyncMock(return_value={})
+    mock_coordinator.devices = [
+        {"deviceId": "101", "extraConfig": {"deviceNumber": "1"}}
+    ]
+
+    await mock_coordinator.async_wake_camera("101")
+
+    mock_coordinator.api.control_monitoring.assert_called_once()
+    call_kwargs = mock_coordinator.api.control_monitoring.call_args[1]
+    assert call_kwargs.get("resolution_level") == 1
+
+
 

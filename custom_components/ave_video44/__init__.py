@@ -39,7 +39,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.3.1"
+_CARD_VERSION = "1.3.2"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -49,7 +49,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.1"
+    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.2"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
 

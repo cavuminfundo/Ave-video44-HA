@@ -16,6 +16,20 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.2 — 2026-10-29
+
+### 🇬🇧 English
+- **Audio RX (Listening)**: Fixed inbound RTP audio stream drop caused by dummy H.264 video keepalive packets mistakenly sent to the audio port; added fallback to plain `RTP/AVP` SDP.
+- **Audio Lifecycle & Continuity**: Preserved registered WebAudio RX callbacks across 40s session renewals in coordinator.
+- **Card Backgrounding**: Fixed accidental call drops when switching browser tabs or putting app to background by removing auto-hangup from visibility change handler.
+- **Video Quality**: Boosted MJPEG encoding quality from `-q:v 6` to `-q:v 2` for crisp details and sharp edges; requested HD stream (`resolutionLevel: 1`) on camera monitoring start.
+
+### 🇮🇹 Italiano
+- **Audio RX (Ascolto)**: Risolto il drop del flusso RTP audio in ricezione causato da pacchetti video dummy H.264 inviati erroneamente sulla porta audio; aggiunto supporto di fallback all'SDP plain `RTP/AVP`.
+- **Continuità Chiamata**: Preservate le callback WebAudio registrate durante i rinnovi automatici della sessione ogni 40s nel coordinator.
+- **Card Web / Companion App**: Risolta la chiusura accidentale della chiamata al cambio di scheda o backgrounding rimuovendo l'auto-hangup dall'handler di visibilità.
+- **Qualità Video**: Aumentata la definizione della codifica MJPEG da `-q:v 6` a `-q:v 2` per la massima nitidezza dei dettagli e dei bordi; richiesta risoluzione HD (`resolutionLevel: 1`) all'avvio del monitoraggio telecamera.
+
 ## v1.3.1 — 2026-10-27
 
 ### 🇬🇧 English

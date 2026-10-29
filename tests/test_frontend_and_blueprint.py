@@ -501,10 +501,10 @@ def test_card_audio_tx_20ms_accumulator():
     assert "ave_video44/audio_tx" in tx_fn
 
 
-def test_card_version_bumped_1_3_1():
-    """Verify CARD_VERSION constant is bumped to 1.3.1."""
+def test_card_version_bumped_1_3_2():
+    """Verify CARD_VERSION constant is bumped to 1.3.2."""
     content = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.1";' in content
+    assert 'const CARD_VERSION = "1.3.2";' in content
 
 
 # ---------------------------------------------------------------------------
@@ -576,4 +576,25 @@ def test_card_monitoring_activate_audio_tx():
     )
 
 
+# ---------------------------------------------------------------------------
+# Test Suite 8: Visibility Change Lifecycle & Background App Behavior
+# ---------------------------------------------------------------------------
 
+
+def test_card_visibility_change_does_not_hangup_call():
+    """Verify _handleVisibilityChange preserves active call and manages frame polling."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    body = _extract_js_method(content, "_handleVisibilityChange")
+
+    assert "this._hangup()" not in body, (
+        "_handleVisibilityChange must not hang up active calls on visibility change"
+    )
+    assert "this._stopFramePolling()" in body, (
+        "_handleVisibilityChange must call this._stopFramePolling() when document is hidden"
+    )
+    assert "this._startFramePolling(true)" in body, (
+        "_handleVisibilityChange must call this._startFramePolling(true) when visible and inCall"
+    )
+    assert "this._inCall" in body, (
+        "_handleVisibilityChange must verify this._inCall before resuming frame polling"
+    )
