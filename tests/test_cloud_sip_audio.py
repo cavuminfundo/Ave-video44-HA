@@ -286,6 +286,7 @@ async def test_cloud_sip_media_session_audio_keepalive_payload_type():
     await relay_task
 
     sent_audio_packets = [call[0][0] for call in mock_audio_sock.sendto.call_args_list]
+    assert len(sent_audio_packets) > 0
     for packet in sent_audio_packets:
         payload_type = packet[1] & 0x7F
         assert payload_type != 96, "Audio keepalive must not use H.264 video payload type (96)"
@@ -439,6 +440,35 @@ async def test_coordinator_wake_camera_requests_hd_resolution(mock_coordinator):
     mock_coordinator.api.control_monitoring.assert_called_once()
     call_kwargs = mock_coordinator.api.control_monitoring.call_args[1]
     assert call_kwargs.get("resolution_level") == 1
+
+
+def test_srtp_rfc3711_key_derivation_vectors():
+    """Verify RFC 3711 Appendix B.3 key derivation vectors for AES-128-CM PRF."""
+    from custom_components.ave_video44.core.sip_session import (
+        _derive_srtp_session_keys,
+        _encrypt_srtp_packet,
+    )
+    import hashlib
+    import hmac
+
+    master_key = bytes.fromhex("E1F97A0D3E018BE0D64FA32C06DE4139")
+    master_salt = bytes.fromhex("0EC675AD498AFEEBB6960B3AABE6")
+    raw_key = master_key + master_salt
+
+    k_e, k_a, k_s = _derive_srtp_session_keys(raw_key)
+    assert k_e == bytes.fromhex("C61E7A93744F39EE10734AFE3FF7A087")
+    assert k_a == bytes.fromhex("CEBE321F6FF7716B6FD4AB49AF256A156D38BAA4")
+    assert k_s == bytes.fromhex("30CBBC08863D8C85D49DB34A9AE1")
+
+    rtp_header = bytes([0x80, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x12, 0x34, 0x56, 0x78])
+    rtp_payload = b"\xd5" * 160
+    srtp_pkt = _encrypt_srtp_packet(rtp_header + rtp_payload, raw_key, ssrc=0x12345678, seq=1, roc=0)
+    expected_tag = hmac.new(k_a, srtp_pkt[:-10] + (0).to_bytes(4, "big"), hashlib.sha1).digest()[:10]
+    assert srtp_pkt[-10:] == expected_tag
+
+    srtp_pkt_inferred = _encrypt_srtp_packet(rtp_header + rtp_payload, raw_key, roc=0)
+    assert srtp_pkt_inferred == srtp_pkt
+
 
 
 

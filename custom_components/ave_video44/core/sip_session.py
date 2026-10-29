@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import collections
+import functools
 import hashlib
 import hmac
 import json
@@ -300,6 +301,55 @@ class AveSipSession(asyncio.DatagramProtocol):
         self._rx_callbacks.clear()
 
 
+@functools.lru_cache(maxsize=8)
+def _derive_srtp_session_keys(srtp_raw_key: bytes) -> tuple[bytes, bytes, bytes]:
+    """Derive SRTP session keys (k_e, k_a, k_s) via RFC 3711 Section 4.3.1 AES-128-CM PRF."""
+    # ponytail: stdlib, upgrade-trigger=rekeying support with non-zero key_derivation_rate
+    master_key = srtp_raw_key[:16]
+    master_salt = srtp_raw_key[16:30]
+
+    def _prf(label: int, length: int) -> bytes:
+        x = bytearray(master_salt)
+        x[7] ^= label
+        iv = bytes(x) + b"\x00\x00"
+        cipher = Cipher(algorithms.AES(master_key), modes.CTR(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        return (encryptor.update(b"\x00" * 32) + encryptor.finalize())[:length]
+
+    return _prf(0x00, 16), _prf(0x01, 20), _prf(0x02, 14)
+
+
+def _encrypt_srtp_packet(
+    rtp_pkt: bytes,
+    srtp_raw_key: bytes,
+    ssrc: int | None = None,
+    seq: int | None = None,
+    roc: int = 0,
+) -> bytes:
+    """Encrypt RTP packet with AES-CTR and HMAC-SHA1-80 auth tag (RFC 3711)."""
+    k_e, k_a, k_s = _derive_srtp_session_keys(srtp_raw_key)
+    rtp_header = rtp_pkt[:12]
+    payload = rtp_pkt[12:]
+
+    if ssrc is None:
+        ssrc = struct.unpack("!I", rtp_header[8:12])[0]
+    if seq is None:
+        seq = struct.unpack("!H", rtp_header[2:4])[0]
+
+    packet_index = (roc << 16) | (seq & 0xFFFF)
+    salt_int = int.from_bytes(k_s, "big")
+    iv_int = (salt_int << 16) ^ ((ssrc & 0xFFFFFFFF) << 64) ^ (packet_index << 16)
+    iv = iv_int.to_bytes(16, "big")
+
+    cipher = Cipher(algorithms.AES(k_e), modes.CTR(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(payload) + encryptor.finalize()
+
+    auth_data = rtp_header + ciphertext + struct.pack("!I", roc)
+    auth_tag = hmac.new(k_a, auth_data, hashlib.sha1).digest()[:10]
+    return rtp_header + ciphertext + auth_tag
+
+
 class CloudSipMediaSession:
     """SIP media session for AVE Cloud (TS-SMART 2-wire) H.264 SRTP video decoding."""
 
@@ -379,6 +429,8 @@ class CloudSipMediaSession:
         self._tx_seq: int = 0
         self._tx_timestamp: int = 0
         self._tx_ssrc: int = 0x12345678
+        self._tx_roc: int = 0
+        self._last_audio_tx_ts: float = 0.0
         self._tx_audio_queue: collections.deque = collections.deque(maxlen=10)
         self._audio_tx_last_log_ts: float = 0.0
         self._audio_tx_pkts: int = 0
@@ -422,33 +474,15 @@ class CloudSipMediaSession:
         dbfs = 20.0 * math.log10(max(1.0, rms) / 32767.0)
         return max(-96.0, min(0.0, dbfs))
 
-    @staticmethod
-    def _encrypt_srtp_packet(
-        rtp_pkt: bytes, srtp_raw_key: bytes, ssrc: int, seq: int, roc: int = 0
-    ) -> bytes:
-        """Encrypt RTP packet with AES-CTR and HMAC-SHA1-80 auth tag (RFC 3711)."""
-        master_key = srtp_raw_key[:16]
-        master_salt = srtp_raw_key[16:30]
-        rtp_header = rtp_pkt[:12]
-        payload = rtp_pkt[12:]
-
-        packet_index = (roc << 16) | (seq & 0xFFFF)
-        salt_int = int.from_bytes(master_salt, "big")
-        iv_int = (salt_int << 16) ^ ((ssrc & 0xFFFFFFFF) << 64) ^ (packet_index << 16)
-        iv = iv_int.to_bytes(16, "big")
-
-        cipher = Cipher(algorithms.AES(master_key), modes.CTR(iv), backend=default_backend())
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(payload) + encryptor.finalize()
-
-        auth_data = rtp_header + ciphertext + struct.pack("!I", roc)
-        auth_tag = hmac.new(master_key, auth_data, hashlib.sha1).digest()[:10]
-        return rtp_header + ciphertext + auth_tag
+    _derive_srtp_session_keys = staticmethod(_derive_srtp_session_keys)
+    _encrypt_srtp_packet = staticmethod(_encrypt_srtp_packet)
 
     def send_pcm16_frame(self, frame: bytes) -> None:
         """Encode PCM16 audio frame to G.711, encrypt with SRTP, and transmit via UDP."""
         if not self.enable_audio:
             return
+
+        self._last_audio_tx_ts = time.monotonic()
 
         rms_dbfs = self.compute_pcm16_rms_dbfs(frame)
         self._audio_tx_rms_samples.append(rms_dbfs)
@@ -480,7 +514,7 @@ class CloudSipMediaSession:
                 self._srtp_tx_audio_key,
                 ssrc=self._tx_ssrc,
                 seq=self._tx_seq,
-                roc=0,
+                roc=self._tx_roc,
             )
         else:
             out_pkt = rtp_pkt
@@ -496,6 +530,8 @@ class CloudSipMediaSession:
                 _LOGGER.debug("Audio TX sendto error: %s", err)
 
         self._tx_seq = (self._tx_seq + 1) & 0xFFFF
+        if self._tx_seq == 0:
+            self._tx_roc += 1
         self._tx_timestamp = (self._tx_timestamp + len(payload)) & 0xFFFFFFFF
 
         now = time.monotonic()
@@ -1120,6 +1156,10 @@ class CloudSipMediaSession:
         max_pkt_gap_ms = 0.0
         audio_rx_pkts = 0
         last_stats_log = time.monotonic()
+        if remote_ip and not self._remote_ip:
+            self._remote_ip = remote_ip
+        if remote_audio_port and not self._remote_audio_port:
+            self._remote_audio_port = remote_audio_port
         while self.is_active:
             now = time.monotonic()
             if now - last_punch >= 0.4:
@@ -1131,6 +1171,9 @@ class CloudSipMediaSession:
                         self._rtcp_sock.sendto(dummy_rtp, (remote_ip, remote_video_port + 1))
                 except Exception:
                     pass
+
+            if self.enable_audio and self._audio_sock and remote_audio_port and (now - self._last_audio_tx_ts) >= 1.0:
+                self.send_pcm16_frame(b"\x00" * 320)
 
             session_age = now - self._session_start_ts if self._session_start_ts > 0 else 0.0
             rtp_gap = (now - self._last_rtp_ts) if self._last_rtp_ts > 0 else 0.0

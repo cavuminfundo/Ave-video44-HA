@@ -16,6 +16,18 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.3 — 2026-10-29
+
+### 🇬🇧 English
+- **SRTP Key Derivation (TX Audio)**: Fixed SRTP Key Derivation Function (RFC 3711 §4.3.1 AES-128-CTR PRF for $k_e, k_a, k_s$) in `_encrypt_srtp_packet`, eliminating `HMAC mismatch` packet drops and restoring clear outbound audio transmission.
+- **Symmetric RTP & NAT Punching (RX Audio)**: Restored periodic G.711 silence keepalive packets (1 Hz when mic is idle) on `_audio_sock` to punch NAT firewall pinholes and enable Symmetric RTP (RFC 4961) audio reception.
+- **WebAudio Lifecycle (Lovelace Card)**: Added idempotent WebSocket subscription guards and automatic `AudioContext.resume()` when entering `suspended` state in `ave-video44-card.js`, preventing browser autoplay audio lockups.
+
+### 🇮🇹 Italiano
+- **Derivazione Chiavi SRTP (Audio TX)**: Risolto il calcolo della Key Derivation Function SRTP (RFC 3711 §4.3.1 AES-128-CTR PRF per $k_e, k_a, k_s$) in `_encrypt_srtp_packet`, eliminando lo scarto dei pacchetti audio per `HMAC mismatch` verso il posto esterno.
+- **Symmetric RTP & NAT Punching (Audio RX)**: Ripristinato il keepalive audio G.711 di silenzio (1 Hz a microfono inattivo) su `_audio_sock` per aprire le sessioni NAT e abilitare la ricezione audio tramite Symmetric RTP (RFC 4961).
+- **Ciclo di Vita WebAudio (Card Lovelace)**: Implementata la guardia idempotente per la sottoscrizione WebSocket e il `resume()` automatico dell'`AudioContext` in caso di stato `suspended` in `ave-video44-card.js`, prevenendo il blocco dell'audio dovuto alle policy autoplay del browser.
+
 ## v1.3.2 — 2026-10-29
 
 ### 🇬🇧 English

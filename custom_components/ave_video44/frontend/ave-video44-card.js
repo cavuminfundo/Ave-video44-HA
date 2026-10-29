@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.2";
+const CARD_VERSION = "1.3.3";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -219,6 +219,10 @@ class AveVideo44Card extends HTMLElement {
       }
     } else if (callSensorState === "talking" || callSensorState === "in_call") {
       if (this._callState !== "talking") {
+        if (!this._inCall) {
+          this._ensureAudioContext();
+          this._subscribeAudioRx();
+        }
         this._setCallState("talking");
       }
     } else if (callSensorState === "monitoring") {
@@ -1211,7 +1215,10 @@ class AveVideo44Card extends HTMLElement {
   }
 
   async _subscribeAudioRx() {
-    if (!this._hass) return;
+    if (!this._hass || !this._hass.connection) return;
+    if (this._audioSubUnsubscribe || this._audioSubscribing) return;
+    this._ensureAudioContext();
+    this._audioSubscribing = true;
     try {
       this._audioSubUnsubscribe = await this._hass.connection.subscribeMessage(
         (msg) => {
@@ -1232,11 +1239,24 @@ class AveVideo44Card extends HTMLElement {
           device_id: this._config.device_id
         }
       );
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      this._audioSubscribing = false;
+    }
   }
 
   _playIncomingPcm16(pcm16Array) {
     if (!this._audioCtx || this._audioCtx.state === "closed") return;
+    if (this._audioCtx.state === "suspended") {
+      this._nextScheduledPlayTime = 0;
+      if (!this._audioResuming) {
+        this._audioResuming = true;
+        this._audioCtx.resume().catch(() => {}).finally(() => {
+          this._audioResuming = false;
+        });
+      }
+      return;
+    }
     const buffer = this._audioCtx.createBuffer(1, pcm16Array.length, 8000);
     const channelData = buffer.getChannelData(0);
     for (let i = 0; i < pcm16Array.length; i++) {
@@ -1276,6 +1296,8 @@ class AveVideo44Card extends HTMLElement {
       this._audioCtx.close().catch(() => {});
       this._audioCtx = null;
     }
+    this._audioResuming = false;
+    this._audioSubscribing = false;
     if (this._audioSubUnsubscribe) {
       try {
         this._audioSubUnsubscribe();

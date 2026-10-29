@@ -201,3 +201,21 @@
 - **Action Duplication**: In outdoor station monitoring mode (`this._callState === 'monitoring'`), the Lovelace card previously showed two red 'Chiudi' buttons simultaneously: the primary in `#inCallControls` and the dynamic toggle on `#btnCallIntercom`. Hiding `#btnHangup` specifically during monitoring leaves a single, clear close button at the bottom without sacrificing dedicated Answer/Reject and Terminate controls in call states.
 - **Unobstructed Video Feed**: Overlays like `#callerBanner` covering the camera stream degrade video clarity on mobile devices. Card state announcements belong in the card header's `#statusBadge`, leaving the camera stream 100% clean and unobstructed.
 - **Safe DOM Purging**: When removing obsolete UI overlay elements, completely purge their lookups (`getElementById('callerBanner')`, `callerNameText`) and all associated `.classList` calls across all state transitions to prevent `TypeError: Cannot read properties of null` during lifecycle resets.
+
+---
+
+## 2026-10-29 — v1.3.3 RFC 3711 SRTP KDF, Symmetric RTP Audio Keepalive & WebAudio Suspended Resume
+
+### 28. RFC 3711 SRTP Key Derivation Function (KDF) & Session Key Derivation
+- **Root Cause & Hazard**: Passing raw master keys directly to AES-CTR and HMAC-SHA1-80 in SRTP packetization violates RFC 3711 §4.3.1. Standard endpoints (OpenSIPS, RTPProxy, GVS outdoor panels) enforce key derivation; encrypting with the master key or computing HMAC tags using `master_key` instead of derived $k_a$ causes immediate `HMAC mismatch` packet drops, completely silencing outbound audio.
+- **AES-128-CM PRF**: SRTP session keys ($k_e$ 16B encryption, $k_a$ 20B authentication, $k_s$ 14B salt) must be derived using AES-128 in Counter Mode on `master_salt XOR (label || r)`.
+- **Performance & Caching**: Key derivation involves multiple cipher rounds. Caching derived session keys with `@functools.lru_cache(maxsize=8)` keyed on the 30-byte raw master key eliminates per-packet KDF overhead while preserving thread-safety.
+
+### 29. Symmetric RTP NAT Pinholes & G.711 Audio Keepalive
+- **NAT Traversal Invariant (RFC 4961)**: Inbound audio streams from cloud media relays require bidirectional Symmetric RTP. If the client socket (`_audio_sock`) receives packets without first transmitting to the relay's audio port, NAT firewalls and cloud relays drop incoming audio or fail to learn the return IP:port mapping.
+- **Audio Silence Framing**: Transmitting periodic 20ms G.711 silence frames (1 Hz rate when microphone is idle) establishes and keeps open the firewall state table without generating audible clicks or bursts.
+
+### 30. WebAudio Autoplay Policy & Resuming Suspended AudioContext
+- **Browser Autoplay Restrictions**: Modern mobile and desktop browsers suspend `AudioContext` instances if initialized before direct user interaction, or if the tab transitions between foreground and background.
+- **Safe Resumption Guard**: Calling `this._audioCtx.resume()` defensively when receiving inbound audio frames, paired with resetting `_nextScheduledPlayTime = 0` and an idempotent resuming flag (`_audioResuming`), restores immediate audio playback without queue latency bursts or promise rejection floods.
+

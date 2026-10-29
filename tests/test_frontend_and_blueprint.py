@@ -501,10 +501,10 @@ def test_card_audio_tx_20ms_accumulator():
     assert "ave_video44/audio_tx" in tx_fn
 
 
-def test_card_version_bumped_1_3_2():
-    """Verify CARD_VERSION constant is bumped to 1.3.2."""
+def test_card_version_bumped_1_3_3():
+    """Verify CARD_VERSION constant is bumped to 1.3.3."""
     content = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.2";' in content
+    assert 'const CARD_VERSION = "1.3.3";' in content
 
 
 # ---------------------------------------------------------------------------
