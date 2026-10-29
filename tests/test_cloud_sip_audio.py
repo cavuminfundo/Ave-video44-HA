@@ -295,7 +295,7 @@ async def test_cloud_sip_media_session_audio_keepalive_payload_type():
 
 @pytest.mark.asyncio
 async def test_cloud_sip_media_session_ffmpeg_audio_spawn_plain_rtp():
-    """Verify async_start spawns FFmpeg audio subprocess when callee_audio_key is empty or absent."""
+    """Verify async_start configures audio_proto and use_srtp_tx without spawning FFmpeg audio."""
     session = CloudSipMediaSession(
         device_id="101",
         sip_username="sip:test@domain.com",
@@ -342,7 +342,9 @@ async def test_cloud_sip_media_session_ffmpeg_audio_spawn_plain_rtp():
 
         started = await session.async_start()
         assert started is True
-        assert session._ffmpeg_audio_proc is not None
+        assert session._audio_proto == "RTP/AVP"
+        assert session._use_srtp_tx is False
+        assert session._ffmpeg_audio_proc is None
         await session.async_stop()
 
 

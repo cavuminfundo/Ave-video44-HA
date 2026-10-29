@@ -400,10 +400,11 @@ def test_cloud_sip_digest_auth_and_packet_construction():
     assert "proxyDeviceId: 677771932745207808" in invite_pkt
     assert "proxyFlag: 1" in invite_pkt
 
-    # Check dual-codec SDP
-    assert "m=audio 18302 RTP/SAVP 0 8 101" in invite_pkt
-    assert "a=rtpmap:0 PCMU/8000" in invite_pkt
+    # Check dual-codec SDP (PCMA primary per v1.3.4)
+    assert "m=audio 18302 RTP/SAVP 8 0 101" in invite_pkt
     assert "a=rtpmap:8 PCMA/8000" in invite_pkt
+    assert "a=rtpmap:0 PCMU/8000" in invite_pkt
+    assert invite_pkt.index("a=rtpmap:8 PCMA/8000") < invite_pkt.index("a=rtpmap:0 PCMU/8000")
     assert "a=rtpmap:101 telephone-event/8000" in invite_pkt
     assert f"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{srtp_audio_key}" in invite_pkt
     assert f"a=crypto:2 AES_CM_128_HMAC_SHA1_32 inline:{srtp_audio_key}" in invite_pkt

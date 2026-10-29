@@ -319,17 +319,40 @@ def _derive_srtp_session_keys(srtp_raw_key: bytes) -> tuple[bytes, bytes, bytes]
     return _prf(0x00, 16), _prf(0x01, 20), _prf(0x02, 14)
 
 
+def _rtp_header_length(pkt: bytes) -> int:
+    """Calculate RTP header length including CSRC and extensions."""
+    # RFC 3550 Section 5.1: 12-byte base header, V=2
+    if len(pkt) < 12 or (pkt[0] >> 6) != 2:
+        return -1
+    cc = pkt[0] & 0x0F
+    header_len = 12 + cc * 4
+    if len(pkt) < header_len:
+        return -1
+    if pkt[0] & 0x10:
+        if len(pkt) < header_len + 4:
+            return -1
+        ext_words = struct.unpack_from("!H", pkt, header_len + 2)[0]
+        header_len += 4 + ext_words * 4
+        if len(pkt) < header_len:
+            return -1
+    return header_len
+
+
 def _encrypt_srtp_packet(
     rtp_pkt: bytes,
     srtp_raw_key: bytes,
     ssrc: int | None = None,
     seq: int | None = None,
     roc: int = 0,
+    tag_len: int = 10,
 ) -> bytes:
-    """Encrypt RTP packet with AES-CTR and HMAC-SHA1-80 auth tag (RFC 3711)."""
-    k_e, k_a, k_s = _derive_srtp_session_keys(srtp_raw_key)
-    rtp_header = rtp_pkt[:12]
-    payload = rtp_pkt[12:]
+    """Encrypt RTP packet with AES-CTR and HMAC-SHA1 auth tag (RFC 3711)."""
+    k_e, k_a, k_s = _derive_srtp_session_keys(srtp_raw_key[:30])
+    hdr_len = _rtp_header_length(rtp_pkt)
+    if hdr_len < 12:
+        hdr_len = 12
+    rtp_header = rtp_pkt[:hdr_len]
+    payload = rtp_pkt[hdr_len:]
 
     if ssrc is None:
         ssrc = struct.unpack("!I", rtp_header[8:12])[0]
@@ -346,8 +369,45 @@ def _encrypt_srtp_packet(
     ciphertext = encryptor.update(payload) + encryptor.finalize()
 
     auth_data = rtp_header + ciphertext + struct.pack("!I", roc)
-    auth_tag = hmac.new(k_a, auth_data, hashlib.sha1).digest()[:10]
+    auth_tag = hmac.new(k_a, auth_data, hashlib.sha1).digest()[:tag_len]
     return rtp_header + ciphertext + auth_tag
+
+
+def _decrypt_srtp_packet(
+    srtp_packet: bytes,
+    master_key_and_salt: bytes,
+    roc: int = 0,
+    tag_len: int = 10,
+) -> Optional[bytes]:
+    """Decrypt SRTP packet with constant-time HMAC check and AES-CTR decryption (RFC 3711)."""
+    if len(master_key_and_salt) < 30 or tag_len <= 0 or len(srtp_packet) < 12 + tag_len:
+        return None
+    hdr_len = _rtp_header_length(srtp_packet[:-tag_len])
+    if hdr_len < 12 or hdr_len > len(srtp_packet) - tag_len:
+        return None
+
+    k_e, k_a, k_s = _derive_srtp_session_keys(master_key_and_salt[:30])
+    rtp_header = srtp_packet[:hdr_len]
+    ciphertext = srtp_packet[hdr_len:-tag_len]
+    received_tag = srtp_packet[-tag_len:]
+
+    auth_data = srtp_packet[:-tag_len] + struct.pack("!I", roc)
+    computed_tag = hmac.new(k_a, auth_data, hashlib.sha1).digest()[:tag_len]
+    if not hmac.compare_digest(received_tag, computed_tag):
+        return None
+
+    ssrc = struct.unpack_from("!I", rtp_header, 8)[0]
+    seq = struct.unpack_from("!H", rtp_header, 2)[0]
+    packet_index = (roc << 16) | (seq & 0xFFFF)
+    salt_int = int.from_bytes(k_s, "big")
+    iv_int = (salt_int << 16) ^ ((ssrc & 0xFFFFFFFF) << 64) ^ (packet_index << 16)
+    iv = iv_int.to_bytes(16, "big")
+
+    cipher = Cipher(algorithms.AES(k_e), modes.CTR(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+    plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    return rtp_header + plaintext
+
 
 
 class CloudSipMediaSession:
@@ -424,7 +484,15 @@ class CloudSipMediaSession:
         self._audio_rx_rms_samples: List[float] = []
         self._remote_ip: Optional[str] = None
         self._remote_audio_port: Optional[int] = None
-        self._audio_payload_type: int = 0
+        self._audio_payload_type: int = 8
+        self._audio_proto: str = "RTP/SAVP"
+        self._use_srtp_tx: bool = True
+        self._srtp_tx_tag_len: int = 10
+        self._srtp_rx_audio_key: Optional[bytes] = None
+        self._srtp_rx_tag_len: int = 10
+        self._rx_audio_roc: int = 0
+        self._rx_last_seq: Optional[int] = None
+        self._rx_pcm16_buf = bytearray()
         self._srtp_tx_audio_key: Optional[bytes] = None
         self._tx_seq: int = 0
         self._tx_timestamp: int = 0
@@ -476,6 +544,8 @@ class CloudSipMediaSession:
 
     _derive_srtp_session_keys = staticmethod(_derive_srtp_session_keys)
     _encrypt_srtp_packet = staticmethod(_encrypt_srtp_packet)
+    _decrypt_srtp_packet = staticmethod(_decrypt_srtp_packet)
+    _rtp_header_length = staticmethod(_rtp_header_length)
 
     def send_pcm16_frame(self, frame: bytes) -> None:
         """Encode PCM16 audio frame to G.711, encrypt with SRTP, and transmit via UDP."""
@@ -508,13 +578,18 @@ class CloudSipMediaSession:
         )
         rtp_pkt = rtp_header + payload
 
-        if self._srtp_tx_audio_key and len(self._srtp_tx_audio_key) >= 30:
+        if (
+            self._use_srtp_tx
+            and self._srtp_tx_audio_key
+            and len(self._srtp_tx_audio_key) >= 30
+        ):
             out_pkt = self._encrypt_srtp_packet(
                 rtp_pkt,
                 self._srtp_tx_audio_key,
                 ssrc=self._tx_ssrc,
                 seq=self._tx_seq,
                 roc=self._tx_roc,
+                tag_len=self._srtp_tx_tag_len,
             )
         else:
             out_pkt = rtp_pkt
@@ -672,7 +747,7 @@ class CloudSipMediaSession:
                     res["audio_payload_type"] = rtp_parts[0]
             elif line.startswith("a=crypto:") and current_media == "audio":
                 parts = line.split()
-                if len(parts) >= 3:
+                if len(parts) >= 3 and not res.get("callee_audio_key"):
                     res["callee_audio_suite"] = parts[1]
                     for p in parts[2:]:
                         if p.startswith("inline:"):
@@ -684,7 +759,7 @@ class CloudSipMediaSession:
                     res["remote_video_port"] = int(parts[1])
             elif line.startswith("a=crypto:") and current_media == "video":
                 parts = line.split()
-                if len(parts) >= 3:
+                if len(parts) >= 3 and not res.get("crypto_key"):
                     res["crypto_suite"] = parts[1]
                     for p in parts[2:]:
                         if p.startswith("inline:"):
@@ -693,7 +768,7 @@ class CloudSipMediaSession:
                 res["video_fmtp"] = line.split("a=fmtp:96 ")[1].strip()
 
         if not res.get("audio_payload_type"):
-            res["audio_payload_type"] = "0"
+            res["audio_payload_type"] = "8"
         res["callee_video_suite"] = res["crypto_suite"]
         res["callee_video_key"] = res["crypto_key"]
         return res
@@ -816,9 +891,9 @@ class CloudSipMediaSession:
             "s=Talk\r\n"
             f"c=IN IP4 {local_ip}\r\n"
             "t=0 0\r\n"
-            f"m=audio {audio_port} RTP/SAVP 0 8 101\r\n"
-            "a=rtpmap:0 PCMU/8000\r\n"
+            f"m=audio {audio_port} RTP/SAVP 8 0 101\r\n"
             "a=rtpmap:8 PCMA/8000\r\n"
+            "a=rtpmap:0 PCMU/8000\r\n"
             "a=rtpmap:101 telephone-event/8000\r\n"
             "a=fmtp:101 0-15\r\n"
             f"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{srtp_audio_key}\r\n"
@@ -991,22 +1066,130 @@ class CloudSipMediaSession:
             pass
 
     def _process_inbound_audio_socket(self) -> bool:
-        """Process inbound packets on audio socket with loopback isolation."""
+        """Process inbound packets on audio socket with pure-Python SRTP/RTP decoding and Symmetric RTP."""
         if not self._audio_sock:
             return False
         had_pkts = False
         try:
             while True:
-                pkt, _ = self._audio_sock.recvfrom(65535)
-                if pkt:
+                pkt, addr = self._audio_sock.recvfrom(65535)
+                if not pkt:
+                    break
+
+                # Backwards-compatibility relay for legacy FFmpeg audio listener tests
+                if self._ffmpeg_audio_port:
                     had_pkts = True
                     self._audio_rx_pkts += 1
                     self._audio_rx_bytes += len(pkt)
-                    if self._ffmpeg_audio_port:
+                    try:
+                        self._audio_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_audio_port))
+                    except OSError as relay_err:
+                        _LOGGER.debug("Audio relay loopback send error: %s", relay_err)
+
+                # RFC 3550 Section 5.1: Minimum 12 bytes and RTP version 2
+                if len(pkt) < 12 or (pkt[0] >> 6) != 2:
+                    continue
+
+                seq = struct.unpack_from("!H", pkt, 2)[0]
+                # RFC 3711 Section 3.3.1: Candidate ROC estimation
+                if self._rx_last_seq is None:
+                    cand_roc = self._rx_audio_roc
+                elif seq < self._rx_last_seq and (self._rx_last_seq - seq) > 32768:
+                    cand_roc = self._rx_audio_roc + 1
+                elif seq > self._rx_last_seq and (seq - self._rx_last_seq) > 32768 and self._rx_audio_roc > 0:
+                    cand_roc = self._rx_audio_roc - 1
+                else:
+                    cand_roc = self._rx_audio_roc
+
+                if self._audio_proto == "RTP/SAVP":
+                    if not self._srtp_rx_audio_key:
+                        continue
+                    rtp_pkt = self._decrypt_srtp_packet(
+                        pkt,
+                        self._srtp_rx_audio_key,
+                        roc=cand_roc,
+                        tag_len=self._srtp_rx_tag_len,
+                    )
+                    if rtp_pkt is None:
+                        continue
+                elif self._audio_proto == "RTP/AVP":
+                    if _rtp_header_length(pkt) <= 0 or (pkt[1] & 0x7F) not in (0, 8):
+                        continue
+                    rtp_pkt = pkt
+                else:
+                    continue
+
+                # Monotonic (roc, seq) high-water mark update after authentication
+                if self._rx_last_seq is None or (cand_roc, seq) > (self._rx_audio_roc, self._rx_last_seq):
+                    self._rx_audio_roc = cand_roc
+                    self._rx_last_seq = seq
+
+                # Symmetric RTP (RFC 4961) learning only after successful authentication
+                if addr and isinstance(addr, tuple) and len(addr) >= 2 and addr[0] not in ("127.0.0.1", "0.0.0.0"):
+                    self._remote_ip, self._remote_audio_port = addr[0], addr[1]
+
+                hdr_len = _rtp_header_length(rtp_pkt)
+                if hdr_len < 12 or hdr_len > len(rtp_pkt):
+                    continue
+                payload = rtp_pkt[hdr_len:]
+
+                # RFC 3550 Section 5.1: Strip RTP padding (bit 0x20)
+                if rtp_pkt[0] & 0x20:
+                    if len(payload) == 0:
+                        continue
+                    pad_len = rtp_pkt[-1]
+                    if pad_len == 0 or pad_len > len(payload):
+                        continue
+                    payload = payload[:-pad_len]
+
+                had_pkts = True
+                self._last_rtp_ts = time.monotonic()
+                if not self._ffmpeg_audio_port:
+                    self._audio_rx_pkts += 1
+                    self._audio_rx_bytes += len(pkt)
+
+                pt = rtp_pkt[1] & 0x7F
+                if pt == 8:
+                    pcm16_chunk = alaw_to_pcm16(payload)
+                elif pt == 0:
+                    pcm16_chunk = ulaw_to_pcm16(payload)
+                else:
+                    continue
+
+                self._rx_pcm16_buf.extend(pcm16_chunk)
+                while len(self._rx_pcm16_buf) >= 320:
+                    frame_320 = bytes(self._rx_pcm16_buf[:320])
+                    del self._rx_pcm16_buf[:320]
+                    rms = self.compute_pcm16_rms_dbfs(frame_320)
+                    self._audio_rx_rms_samples.append(rms)
+
+                    now = time.monotonic()
+                    if self._audio_rx_last_log_ts == 0.0:
+                        self._audio_rx_last_log_ts = now
+                    elif now - self._audio_rx_last_log_ts >= 5.0:
+                        elapsed = now - self._audio_rx_last_log_ts
+                        avg_rms = (
+                            sum(self._audio_rx_rms_samples) / len(self._audio_rx_rms_samples)
+                            if self._audio_rx_rms_samples
+                            else -96.0
+                        )
+                        _LOGGER.debug(
+                            "audio_rx device=%s pkts=%d bytes=%d rate=%.1f fps rms=%.1f dBFS",
+                            self.device_id,
+                            self._audio_rx_pkts,
+                            self._audio_rx_bytes,
+                            len(self._audio_rx_rms_samples) / elapsed if elapsed > 0 else 0.0,
+                            avg_rms,
+                        )
+                        self._audio_rx_rms_samples.clear()
+                        self._audio_rx_last_log_ts = now
+
+                    for cb in list(self._rx_pcm16_callbacks):
                         try:
-                            self._audio_sock.sendto(pkt, ("127.0.0.1", self._ffmpeg_audio_port))
-                        except OSError as relay_err:
-                            _LOGGER.debug("Audio relay loopback send error: %s", relay_err)
+                            cb(frame_320)
+                        except Exception as err:
+                            _LOGGER.debug("Audio RX callback error: %s", err)
+
         except (BlockingIOError, InterruptedError):
             pass
         except Exception as err:
@@ -1311,16 +1494,7 @@ class CloudSipMediaSession:
             await asyncio.sleep(cooldown_wait)
 
         try:
-            loop_thread_id = threading.get_ident()
             self._loop_heartbeat_ts = time.monotonic()
-            self._stall_stop_event = threading.Event()
-            self._stall_thread = threading.Thread(
-                target=self._run_stall_watchdog,
-                args=(loop_thread_id,),
-                name=f"sip-stall-{self.device_id}",
-                daemon=True,
-            )
-            self._stall_thread.start()
 
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1582,8 +1756,22 @@ class CloudSipMediaSession:
             remote_audio_port = parsed_sdp["remote_audio_port"]
             self._remote_ip = remote_ip
             self._remote_audio_port = remote_audio_port
-            pt_str = parsed_sdp.get("audio_payload_type") or "0"
-            self._audio_payload_type = int(pt_str) if str(pt_str).isdigit() else 0
+            pt_str = parsed_sdp.get("audio_payload_type") or "8"
+            self._audio_payload_type = int(pt_str) if str(pt_str).isdigit() else 8
+            self._audio_proto = parsed_sdp.get("audio_proto", "RTP/SAVP")
+            callee_audio_key = parsed_sdp.get("callee_audio_key")
+            callee_audio_suite = parsed_sdp.get("callee_audio_suite") or "AES_CM_128_HMAC_SHA1_80"
+            self._srtp_rx_tag_len = 4 if "32" in callee_audio_suite else 10
+            self._srtp_tx_tag_len = 10
+            if callee_audio_key:
+                try:
+                    self._srtp_rx_audio_key = base64.b64decode(callee_audio_key)
+                except Exception:
+                    self._srtp_rx_audio_key = None
+            else:
+                self._srtp_rx_audio_key = None
+
+            self._use_srtp_tx = bool(self._audio_proto == "RTP/SAVP" and callee_audio_key)
             _LOGGER.debug(
                 "SIP media session started: local audio_port=%d video_port=%d, "
                 "remote ip=%s audio_remote_port=%d video_remote_port=%d, negotiated_audio_pt=%s",
@@ -1603,28 +1791,6 @@ class CloudSipMediaSession:
                 video_fmtp=parsed_sdp["video_fmtp"],
             )
             await self._async_write_sdp_file(self._sdp_path, sdp_content)
-
-            callee_audio_key = parsed_sdp.get("callee_audio_key")
-            audio_proto = parsed_sdp.get("audio_proto", "RTP/SAVP")
-            if (
-                self.enable_audio
-                and self._ffmpeg_audio_port
-                and (callee_audio_key or audio_proto == "RTP/AVP")
-            ):
-                callee_audio_suite = parsed_sdp.get("callee_audio_suite") or "AES_CM_128_HMAC_SHA1_80"
-                audio_pt = parsed_sdp.get("audio_payload_type") or "0"
-                self._audio_sdp_path = f"/tmp/ave_video44_audio_{self.device_id}_{uuid.uuid4().hex[:6]}.sdp"
-                audio_sdp_content = self._generate_audio_sdp(
-                    ffmpeg_audio_port=self._ffmpeg_audio_port,
-                    crypto_suite=callee_audio_suite,
-                    crypto_key=callee_audio_key or "",
-                    payload_type=audio_pt,
-                )
-                await self._async_write_sdp_file(self._audio_sdp_path, audio_sdp_content)
-                await self._start_ffmpeg_audio_subprocess(self._audio_sdp_path)
-                if self._ffmpeg_audio_proc:
-                    self._ffmpeg_audio_task = asyncio.create_task(self._ffmpeg_audio_stdout_loop())
-                    self._tasks.append(self._ffmpeg_audio_task)
 
             ffmpeg_cmd = [
                 self.ffmpeg_binary,
@@ -1666,6 +1832,17 @@ class CloudSipMediaSession:
             self._sip_rx_task = asyncio.create_task(self._sip_rx_loop())
             self._tasks.append(self._sip_rx_task)
             self._tasks.append(asyncio.create_task(self._event_loop_lag_loop()))
+
+            if not self._stall_thread:
+                loop_thread_id = threading.get_ident()
+                self._stall_stop_event = threading.Event()
+                self._stall_thread = threading.Thread(
+                    target=self._run_stall_watchdog,
+                    args=(loop_thread_id,),
+                    name=f"sip-stall-{self.device_id}",
+                    daemon=True,
+                )
+                self._stall_thread.start()
 
             await self.wait_for_first_frame(timeout=2.5)
             return True

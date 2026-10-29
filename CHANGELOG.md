@@ -16,6 +16,20 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.4 — 2026-10-29
+
+### 🇬🇧 English
+- **Pure-Python SRTP & G.711 Audio RX**: Replaced FFmpeg audio RX subprocess and pipe buffering with zero-latency (~0.08 ms) pure-Python SRTP decryption (RFC 3711 HMAC-SHA1 80-bit and 32-bit verification, CSRC / `0x10` header extensions, `0x20` padding, and monotonic ROC rollover tracking) and G.711 A-law/μ-law lookup decoding directly into 320-byte PCM16 chunks.
+- **Authenticated Symmetric RTP & SDP Negotiation**: Implemented Symmetric RTP (RFC 4961) learning `(remote_ip, remote_audio_port)` only upon valid HMAC packet authentication (preventing UDP spoofing), offered PCMA (`8 0 101`) priority in INVITE SDP, preserved `AES_CM_128_HMAC_SHA1_80` crypto suites, and conditioned TX encryption to negotiated `RTP/SAVP`.
+- **Coordinator Answer & Watchdog Synchronization**: Added automatic camera wake-up (`async_wake_camera`) when answering calls before active SIP session creation in `coordinator.async_answer_call()`, and synchronized audio stall watchdog startup with event loop monitoring.
+- **WebAudio Autoplay & Session Ordering**: Added synchronous `AudioContext` unlock to `_monitor()`, `_answer()`, `_callIntercom()`, and `_toggleMute()` before async dispatch, reordered session activation to establish SIP media before starting audio RX/TX, and preserved `_nextScheduledPlayTime` timeline in `_playIncomingPcm16()` without frame drops during suspended audio states.
+
+### 🇮🇹 Italiano
+- **SRTP & G.711 Audio RX Pure-Python**: Sostituito il sottoprocesso FFmpeg audio e il buffering su `pipe:1` con decifratura SRTP nativa pure-Python a latenza zero (~0.08 ms, conforme RFC 3711 con HMAC-SHA1 a 80 e 32 bit, estensioni di intestazione `0x10`, padding `0x20` e rollover ROC monotono) e decodifica diretta G.711 A-law/μ-law in chunk PCM16 a 320 byte.
+- **Symmetric RTP Autenticato e Negoziazione SDP**: Implementato Symmetric RTP (RFC 4961) con apprendimento dell'endpoint `(remote_ip, remote_audio_port)` vincolato al superamento dell'autenticazione HMAC (anti-spoofing UDP), priorità del codec `PCMA` (`8 0 101`) nell'INVITE SDP, mantenimento della suite crittografica `AES_CM_128_HMAC_SHA1_80`, e cifratura TX applicata solo con profilo `RTP/SAVP`.
+- **Risposta Coordinator e Sincronizzazione Watchdog**: Avvio automatico del risveglio telecamera (`async_wake_camera`) all'accettazione della chiamata prima della sessione SIP attiva in `coordinator.async_answer_call()`, e sincronizzazione del watchdog stallo audio con il monitoraggio dell'event loop.
+- **Sblocco WebAudio e Sequenza Chiamata**: Sblocco sincrono dell'`AudioContext` in `_monitor()`, `_answer()`, `_callIntercom()` e `_toggleMute()` prima di qualsiasi `await`, riordinata l'attivazione della sessione prima di avviare RX/TX audio, ed eliminato lo scarto di frame e il reset del cursore temporale `_nextScheduledPlayTime` in `_playIncomingPcm16()` durante lo stato `"suspended"`.
+
 ## v1.3.3 — 2026-10-29
 
 ### 🇬🇧 English

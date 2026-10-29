@@ -173,11 +173,25 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.active_caller_name = self.resolve_caller_name(target)
         self.async_update_listeners()
 
-    async def async_answer_call(self, device_id: int | str) -> None:
+    async def async_answer_call(self, device_id: Optional[int | str] = None) -> None:
         """Accept active incoming call."""
-        _LOGGER.debug("Answering call on device %s", device_id)
+        first_dev = ""
+        if isinstance(self.devices, dict) and self.devices:
+            first_dev = str(next(iter(self.devices.keys())))
+        elif isinstance(self.devices, list) and self.devices:
+            first_dev = str(self.devices[0].get("deviceId", ""))
+
+        target_dev = str(device_id or self.active_device_id or first_dev or "")
+        _LOGGER.debug("Answering call on device %s (resolved %s)", device_id, target_dev)
+
+        if target_dev and not self.cloud_sip_sessions.get(target_dev):
+            await self.async_wake_camera(target_dev)
+
         self.call_state = "in_call"
-        self.active_device_id = str(device_id)
+        if target_dev:
+            self.active_device_id = target_dev
+        elif device_id is not None:
+            self.active_device_id = str(device_id)
         self.async_update_listeners()
 
     async def async_wait_for_wake(self, device_id: int | str, timeout: float = 10.0) -> None:

@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.3";
+const CARD_VERSION = "1.3.4";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -966,18 +966,6 @@ class AveVideo44Card extends HTMLElement {
   async _answer() {
     this._ensureAudioContext();
     this._setCallState("talking");
-    const shadow = this.shadowRoot;
-    const btnMute = shadow ? shadow.getElementById("btnMute") : null;
-    const muteLabel = shadow ? shadow.getElementById("muteLabel") : null;
-    try {
-      await this._startAudioTx();
-    } catch (err) {
-      console.warn("[AVE V44] Microphone unavailable, falling back to listen-only:", err);
-      if (btnMute) btnMute.disabled = true;
-      if (muteLabel) muteLabel.textContent = "Microfono assente";
-      this._showFeedback("Microfono non rilevato: modalità solo ascolto attiva", "warning");
-    }
-    await this._subscribeAudioRx();
     if (this._hass) {
       try {
         await this._hass.connection.sendMessagePromise({
@@ -988,6 +976,18 @@ class AveVideo44Card extends HTMLElement {
       } catch (err) {
         this._showError("Errore risposta chiamata: " + (err && err.message ? err.message : String(err)));
       }
+    }
+    await this._subscribeAudioRx();
+    const shadow = this.shadowRoot;
+    const btnMute = shadow ? shadow.getElementById("btnMute") : null;
+    const muteLabel = shadow ? shadow.getElementById("muteLabel") : null;
+    try {
+      await this._startAudioTx();
+    } catch (err) {
+      console.warn("[AVE V44] Microphone unavailable, falling back to listen-only:", err);
+      if (btnMute) btnMute.disabled = true;
+      if (muteLabel) muteLabel.textContent = "Microfono assente";
+      this._showFeedback("Microfono non rilevato: modalità solo ascolto attiva", "warning");
     }
   }
 
@@ -1008,6 +1008,7 @@ class AveVideo44Card extends HTMLElement {
   }
 
   async _toggleMute() {
+    this._ensureAudioContext();
     const shadow = this.shadowRoot;
     const btnMute = shadow ? shadow.getElementById("btnMute") : null;
     const muteIcon = shadow ? shadow.getElementById("muteIcon") : null;
@@ -1094,6 +1095,19 @@ class AveVideo44Card extends HTMLElement {
     }
 
     this._setCallState("talking");
+    try {
+      await this._hass.callService("ave_video44", "call_intercom", {
+        device_id: this._config.device_id,
+        room_code: target
+      });
+      await this._subscribeAudioRx();
+    } catch (err) {
+      this._cleanupCall();
+      this._showError("Chiamata non riuscita: " + (err && err.message ? err.message : String(err)));
+      this._setCallState("error");
+      return;
+    }
+
     const btnMute = shadow ? shadow.getElementById("btnMute") : null;
     const muteLabel = shadow ? shadow.getElementById("muteLabel") : null;
     try {
@@ -1103,18 +1117,6 @@ class AveVideo44Card extends HTMLElement {
       if (btnMute) btnMute.disabled = true;
       if (muteLabel) muteLabel.textContent = "Microfono assente";
       this._showFeedback("Microfono non rilevato: modalità solo ascolto attiva", "warning");
-    }
-
-    try {
-      await this._subscribeAudioRx();
-      await this._hass.callService("ave_video44", "call_intercom", {
-        device_id: this._config.device_id,
-        room_code: target
-      });
-    } catch (err) {
-      this._cleanupCall();
-      this._showError("Chiamata non riuscita: " + (err && err.message ? err.message : String(err)));
-      this._setCallState("error");
     }
   }
 
@@ -1143,10 +1145,7 @@ class AveVideo44Card extends HTMLElement {
       throw new Error("Dispositivo senza supporto WebAudio getUserMedia");
     }
 
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!this._audioCtx || this._audioCtx.state === "closed") {
-      this._audioCtx = new AudioContextClass();
-    }
+    this._ensureAudioContext();
     if (this._audioCtx && this._audioCtx.state === "suspended") {
       await this._audioCtx.resume();
     }
@@ -1247,15 +1246,12 @@ class AveVideo44Card extends HTMLElement {
 
   _playIncomingPcm16(pcm16Array) {
     if (!this._audioCtx || this._audioCtx.state === "closed") return;
-    if (this._audioCtx.state === "suspended") {
-      this._nextScheduledPlayTime = 0;
-      if (!this._audioResuming) {
-        this._audioResuming = true;
-        this._audioCtx.resume().catch(() => {}).finally(() => {
-          this._audioResuming = false;
-        });
-      }
-      return;
+    if (this._audioCtx.state === "suspended" && !this._audioResuming) {
+      // Resume suspended audio without dropping frames or resetting play cursor.
+      this._audioResuming = true;
+      this._audioCtx.resume().catch(() => {}).finally(() => {
+        this._audioResuming = false;
+      });
     }
     const buffer = this._audioCtx.createBuffer(1, pcm16Array.length, 8000);
     const channelData = buffer.getChannelData(0);
