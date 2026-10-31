@@ -16,6 +16,24 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.5 — 2026-10-31
+
+### 🇬🇧 English
+- **WebAudio Anti-Aliasing**: added 3400 Hz Butterworth low-pass filter before 8kHz downsampling, completely eliminating spectral aliasing and robotic/metallic voice distortions.
+- **Low-Latency Capture**: reduced ScriptProcessor buffer from 2048 to 1024 samples, halving hardware capture delay and eliminating packet bursts.
+- **Sidetone Isolation**: muted local output buffer during microphone capture to prevent acoustic echo, sidetone and feedback loops.
+- **Dynamic RX Jitter Buffer**: implemented 40ms target playhead with early packet discard on drift >100ms, eliminating comb filtering and backlog latency.
+- **Fire-and-Forget Audio TX**: added optional `ack` flag to `ave_video44/audio_tx` (default `false`), eliminating 50 JSON ACK messages/sec over WebSocket.
+- **SIP Session Resilience**: extended REGISTER timeout retry sleep to 3.0s in compliance with Lesson 26 hardware cooldown, preventing OpenSIPS TCP resets.
+
+### 🇮🇹 Italiano
+- **Anti-Aliasing WebAudio**: aggiunto filtro passa-basso Butterworth a 3400 Hz pre-downsampling a 8 kHz, eliminando distorsioni metalliche e voce robotica da ripiegamento di Nyquist.
+- **Cattura a Bassa Latenza**: ridotto il buffer ScriptProcessor da 2048 a 1024 campioni, dimezzando il ritardo di cattura ed eliminando l'invio a raffiche binate.
+- **Isolamento Sidetone**: azzerato il buffer d'uscita locale durante la cattura microfonica per prevenire eco acustico, sidetone e risonanze.
+- **Jitter Buffer RX Dinamico**: playhead iniziale a 40 ms con scarto preventivo dei frame su drift >100 ms, azzerando sovrapposizioni e distorsioni da comb filtering.
+- **Audio TX Fire-and-Forget**: introdotto parametro opzionale `ack` su `ave_video44/audio_tx` (default `false`), rimuovendo 50 messaggi JSON ACK/s su WebSocket.
+- **Resilienza Sessione SIP**: esteso a 3.0s il cooldown su timeout REGISTER iniziale in conformità alla Lezione 26, evitando reset TCP da parte di OpenSIPS.
+
 ## v1.3.4 — 2026-10-29
 
 ### 🇬🇧 English

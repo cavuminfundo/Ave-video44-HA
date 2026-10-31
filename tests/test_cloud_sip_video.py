@@ -1634,7 +1634,7 @@ async def test_cloud_sip_media_session_rtp_timeout_at_25s(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cloud_sip_media_session_register_retry_four_attempts(monkeypatch):
-    """Verify REGISTER retries up to 4 times with 2.5s read timeout and 0.5s backoff."""
+    """Verify REGISTER retries up to 4 times with 2.5s read timeout and 3.0s backoff."""
     from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
 
     monkeypatch.setattr(CloudSipMediaSession, "_last_session_stop_ts", 0.0)
@@ -1678,7 +1678,7 @@ async def test_cloud_sip_media_session_register_retry_four_attempts(monkeypatch)
 
     with patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)), \
          patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
-         patch("asyncio.sleep", new_callable=AsyncMock):
+         patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         fake_proc = MagicMock()
         fake_proc.stdout = AsyncMock()
         fake_proc.stdout.read = AsyncMock(return_value=b"")
@@ -1690,6 +1690,11 @@ async def test_cloud_sip_media_session_register_retry_four_attempts(monkeypatch)
         started = await asyncio.wait_for(sess.async_start(), timeout=2.0)
         assert started is True
         assert attempt_count >= 3
+
+        # Verify 3.0s backoff sleep per Lesson 26
+        sleep_durations = [call.args[0] for call in mock_sleep.call_args_list if call.args]
+        assert 3.0 in sleep_durations, f"Expected 3.0s backoff in sleep calls, got: {sleep_durations}"
+
         await sess.async_stop()
 
 

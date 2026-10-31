@@ -99,6 +99,7 @@ async def ws_call_control(
     vol.Optional("entry_id"): str,
     vol.Required("device_id"): vol.Any(int, str),
     vol.Required("payload"): str,
+    vol.Optional("ack", default=False): vol.Any(bool, vol.Coerce(bool)),
 })
 @websocket_api.async_response
 async def ws_audio_tx(
@@ -112,9 +113,12 @@ async def ws_audio_tx(
     try:
         session = get_active_sip_session(coordinator, device_id)
         if not session:
-            raise websocket_api.WebSocketError(
-                "not_found", f"No active SIP session for device {device_id}"
-            )
+            if msg.get("ack", False):
+                raise websocket_api.WebSocketError(
+                    "not_found", f"No active SIP session for device {device_id}"
+                )
+            _LOGGER.debug("audio_tx dropped: no active SIP session for device %s", device_id)
+            return
 
         pcm16_data = base64.b64decode(msg["payload"])
         now = time.monotonic()
@@ -161,12 +165,16 @@ async def ws_audio_tx(
         elif hasattr(session, "send_audio_frame"):
             session.send_audio_frame(pcm16_data)
 
-        connection.send_result(msg["id"], {"success": True})
+        if msg.get("ack", False):
+            connection.send_result(msg["id"], {"success": True})
     except websocket_api.WebSocketError:
-        raise
+        if msg.get("ack", False):
+            raise
+        _LOGGER.debug("audio_tx WebSocketError suppressed in fire-and-forget mode")
     except Exception as err:
         _LOGGER.error("Failed to forward audio frame: %s", err)
-        connection.send_error(msg["id"], "audio_tx_failed", str(err))
+        if msg.get("ack", False):
+            connection.send_error(msg["id"], "audio_tx_failed", str(err))
 
 
 @websocket_api.websocket_command({

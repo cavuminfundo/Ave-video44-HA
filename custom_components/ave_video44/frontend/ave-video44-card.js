@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.4";
+const CARD_VERSION = "1.3.5";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -12,6 +12,8 @@ class AveVideo44Card extends HTMLElement {
     this._callState = "idle";
     this._isMuted = false;
     this._mediaStream = null;
+    this._audioSourceNode = null;
+    this._lowpassFilter = null;
     this._audioCtx = null;
     this._audioWorkletNode = null;
     this._scriptProcessor = null;
@@ -1161,12 +1163,26 @@ class AveVideo44Card extends HTMLElement {
     });
 
     const source = this._audioCtx.createMediaStreamSource(this._mediaStream);
-    const bufferSize = 2048;
-    this._scriptProcessor = this._audioCtx.createScriptProcessor(bufferSize, 1, 1);
+    this._audioSourceNode = source;
+
+    // Anti-aliasing Nyquist filter: suppress frequencies above 3400 Hz before 8 kHz resampling
+    const lowpass = this._audioCtx.createBiquadFilter();
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = 3400;
+    lowpass.Q.value = 0.7071;
+    this._lowpassFilter = lowpass;
+
+    // Halve capture buffer to 1024 samples (~21.3ms at 48kHz) to eliminate dual-packet bursts
+    const bufferSize = 1024;
+    this._scriptProcessor = this._audioCtx.createScriptProcessor(1024, 1, 1);
 
     const inputSampleRate = this._audioCtx.sampleRate;
 
     this._scriptProcessor.onaudioprocess = (e) => {
+      // Acoustic isolation: zero out output buffer to prevent mic audio leaking into local speakers
+      const outputData = e.outputBuffer.getChannelData(0);
+      outputData.fill(0);
+
       if (this._isMuted || !this._inCall || !this._hass) return;
       const inputData = e.inputBuffer.getChannelData(0);
       const pcm16Data = this._resampleTo8kPcm16(inputData, inputSampleRate);
@@ -1181,12 +1197,14 @@ class AveVideo44Card extends HTMLElement {
         this._hass.connection.sendMessage({
           type: "ave_video44/audio_tx",
           device_id: this._config.device_id,
-          payload: base64Str
+          payload: base64Str,
+          ack: false
         });
       }
     };
 
-    source.connect(this._scriptProcessor);
+    source.connect(lowpass);
+    lowpass.connect(this._scriptProcessor);
     this._scriptProcessor.connect(this._audioCtx.destination);
   }
 
@@ -1253,6 +1271,17 @@ class AveVideo44Card extends HTMLElement {
         this._audioResuming = false;
       });
     }
+
+    const now = this._audioCtx.currentTime;
+    const leadTime = 0.040;
+    const maxDrift = 0.100;
+
+    if (!this._nextScheduledPlayTime || this._nextScheduledPlayTime <= now) {
+      this._nextScheduledPlayTime = now + leadTime;
+    } else if (this._nextScheduledPlayTime - now > maxDrift) {
+      return;
+    }
+
     const buffer = this._audioCtx.createBuffer(1, pcm16Array.length, 8000);
     const channelData = buffer.getChannelData(0);
     for (let i = 0; i < pcm16Array.length; i++) {
@@ -1263,12 +1292,6 @@ class AveVideo44Card extends HTMLElement {
     source.buffer = buffer;
     source.connect(this._audioCtx.destination);
 
-    const now = this._audioCtx.currentTime;
-    if (!this._nextScheduledPlayTime || this._nextScheduledPlayTime <= now) {
-      this._nextScheduledPlayTime = now + 0.120;
-    } else {
-      this._nextScheduledPlayTime = Math.min(this._nextScheduledPlayTime, now + 0.300);
-    }
     source.start(this._nextScheduledPlayTime);
     this._nextScheduledPlayTime += buffer.duration;
   }
@@ -1284,7 +1307,16 @@ class AveVideo44Card extends HTMLElement {
       this._mediaStream.getTracks().forEach((track) => track.stop());
       this._mediaStream = null;
     }
+    if (this._audioSourceNode) {
+      this._audioSourceNode.disconnect();
+      this._audioSourceNode = null;
+    }
+    if (this._lowpassFilter) {
+      this._lowpassFilter.disconnect();
+      this._lowpassFilter = null;
+    }
     if (this._scriptProcessor) {
+      this._scriptProcessor.onaudioprocess = null;
       this._scriptProcessor.disconnect();
       this._scriptProcessor = null;
     }

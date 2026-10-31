@@ -768,16 +768,18 @@ async def test_ws_call_control(mock_hass, mock_coordinator):
 
 @pytest.mark.asyncio
 async def test_ws_audio_tx(mock_hass, mock_coordinator):
-    """Test websocket ave_video44/audio_tx transmitting base64 PCM16 frames."""
+    """Test websocket ave_video44/audio_tx transmitting base64 PCM16 frames with ack handling."""
     mock_hass.data[DOMAIN] = {"entries": {mock_coordinator.entry_id: mock_coordinator}}
     conn = MagicMock()
     conn.send_result = MagicMock()
+    conn.send_error = MagicMock()
 
     # 160 samples PCM16 = 320 bytes
     pcm16_data = b"\x00\x01" * 160
     b64_payload = base64.b64encode(pcm16_data).decode("ascii")
 
-    msg = {
+    # Default fire-and-forget (ack=False)
+    msg_no_ack = {
         "id": 2,
         "type": "ave_video44/audio_tx",
         "entry_id": mock_coordinator.entry_id,
@@ -785,9 +787,58 @@ async def test_ws_audio_tx(mock_hass, mock_coordinator):
         "payload": b64_payload,
     }
 
-    await ws_api.ws_audio_tx(mock_hass, conn, msg)
+    await ws_api.ws_audio_tx(mock_hass, conn, msg_no_ack)
     mock_coordinator.sip_session.send_pcm16_frame.assert_called_with(pcm16_data)
-    conn.send_result.assert_called_with(2, {"success": True})
+    conn.send_result.assert_not_called()
+    conn.send_error.assert_not_called()
+
+    # Explicit ack=True
+    conn.send_result.reset_mock()
+    mock_coordinator.sip_session.send_pcm16_frame.reset_mock()
+    msg_with_ack = {
+        "id": 3,
+        "type": "ave_video44/audio_tx",
+        "entry_id": mock_coordinator.entry_id,
+        "device_id": 9991,
+        "payload": b64_payload,
+        "ack": True,
+    }
+
+    await ws_api.ws_audio_tx(mock_hass, conn, msg_with_ack)
+    mock_coordinator.sip_session.send_pcm16_frame.assert_called_with(pcm16_data)
+    conn.send_result.assert_called_with(3, {"success": True})
+    conn.send_error.assert_not_called()
+
+    # Missing session with ack=False: suppressed cleanly
+    mock_coordinator.sip_session = None
+    if hasattr(mock_coordinator, "cloud_sip_sessions"):
+        mock_coordinator.cloud_sip_sessions.clear()
+
+    conn.send_result.reset_mock()
+    conn.send_error.reset_mock()
+    msg_no_session_no_ack = {
+        "id": 4,
+        "type": "ave_video44/audio_tx",
+        "entry_id": mock_coordinator.entry_id,
+        "device_id": 9991,
+        "payload": b64_payload,
+        "ack": False,
+    }
+    await ws_api.ws_audio_tx(mock_hass, conn, msg_no_session_no_ack)
+    conn.send_result.assert_not_called()
+    conn.send_error.assert_not_called()
+
+    # Missing session with ack=True: raises WebSocketError
+    msg_no_session_ack = {
+        "id": 5,
+        "type": "ave_video44/audio_tx",
+        "entry_id": mock_coordinator.entry_id,
+        "device_id": 9991,
+        "payload": b64_payload,
+        "ack": True,
+    }
+    with pytest.raises(Exception):
+        await ws_api.ws_audio_tx(mock_hass, conn, msg_no_session_ack)
 
 
 @pytest.mark.asyncio

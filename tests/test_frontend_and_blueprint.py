@@ -447,17 +447,17 @@ def test_card_ensure_audiocontext_synchronous_gesture():
 
 
 def test_card_audio_rx_jitter_buffer_clamping():
-    """Verify _playIncomingPcm16 schedules audio with 120ms jitter buffer and 300ms clamp."""
+    """Verify _playIncomingPcm16 implements 40ms playhead with 100ms drift packet discard."""
     content = CARD_PATH.read_text(encoding="utf-8")
     body = _extract_js_method(content, "_playIncomingPcm16")
-    assert "0.120" in body or "0.12" in body, (
-        "_playIncomingPcm16 must schedule initial playback at 120ms (0.120 or 0.12)"
+    assert "0.040" in body or "0.04" in body, (
+        "_playIncomingPcm16 must target 40ms initial playhead (0.040 or 0.04)"
     )
-    assert "0.300" in body or "0.3" in body, (
-        "_playIncomingPcm16 must clamp maximum jitter buffer delay at 300ms (0.300 or 0.3)"
+    assert "0.100" in body or "0.1" in body, (
+        "_playIncomingPcm16 must enforce 100ms maximum drift threshold (0.100 or 0.1)"
     )
-    assert "Math.min" in body, (
-        "_playIncomingPcm16 must use Math.min for clamping maximum jitter buffer delay"
+    assert "return;" in body or "return ;" in body, (
+        "_playIncomingPcm16 must discard excess packets exceeding drift threshold before buffer creation"
     )
 
 
@@ -501,10 +501,44 @@ def test_card_audio_tx_20ms_accumulator():
     assert "ave_video44/audio_tx" in tx_fn
 
 
-def test_card_version_bumped_1_3_4():
-    """Verify CARD_VERSION constant is bumped to 1.3.4."""
+def test_card_webaudio_lowpass_filter_and_buffer_size():
+    """Verify WebAudio TX uses 3400Hz low-pass filter and 1024-sample ScriptProcessor."""
     content = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.4";' in content
+    tx_fn = _extract_js_method(content, "_startAudioTx")
+
+    assert "createBiquadFilter()" in tx_fn, "_startAudioTx must create a BiquadFilterNode"
+    assert '"lowpass"' in tx_fn or "'lowpass'" in tx_fn, "BiquadFilter must be configured as lowpass"
+    assert "3400" in tx_fn, "Low-pass cutoff frequency must be set to 3400 Hz for Nyquist anti-aliasing"
+    assert "createScriptProcessor(1024" in tx_fn, "ScriptProcessor buffer size must be 1024 samples"
+
+
+def test_card_microphone_sidetone_isolation():
+    """Verify onaudioprocess uses outputData.fill(0) to prevent local echo and resonance."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    tx_fn = _extract_js_method(content, "_startAudioTx")
+
+    assert "outputBuffer" in tx_fn, "onaudioprocess must reference outputBuffer"
+    assert "outputData.fill(0)" in tx_fn, (
+        "onaudioprocess must use outputData.fill(0) to prevent mic loopback to speakers"
+    )
+
+
+def test_card_cleanup_disconnects_audio_nodes_and_clears_callbacks():
+    """Verify _cleanupCall disconnects audio source, lowpass filter, and nulls onaudioprocess."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    cleanup_fn = _extract_js_method(content, "_cleanupCall")
+
+    assert "this._audioSourceNode" in cleanup_fn, "_cleanupCall must reference _audioSourceNode"
+    assert "this._lowpassFilter" in cleanup_fn, "_cleanupCall must reference _lowpassFilter"
+    assert "this._scriptProcessor.onaudioprocess = null;" in cleanup_fn, (
+        "_cleanupCall must explicitly null onaudioprocess callback to prevent GC leaks"
+    )
+
+
+def test_card_version_bumped_1_3_5():
+    """Verify CARD_VERSION constant is bumped to 1.3.5."""
+    content = CARD_PATH.read_text(encoding="utf-8")
+    assert 'const CARD_VERSION = "1.3.5";' in content
 
 
 # ---------------------------------------------------------------------------

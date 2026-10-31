@@ -1551,7 +1551,7 @@ class CloudSipMediaSession:
                     break
                 except asyncio.TimeoutError:
                     if reg_attempt < 3:
-                        _LOGGER.warning("Timeout waiting for initial REGISTER response, retrying in 0.5s...")
+                        _LOGGER.warning("Timeout waiting for initial REGISTER response, retrying in 3.0s...")
                         if self._writer:
                             try:
                                 self._writer.close()
@@ -1561,7 +1561,7 @@ class CloudSipMediaSession:
                             self._writer = None
                         self._reader = None
                         self._rx_buf.clear()
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(3.0)
                     else:
                         raise
 
