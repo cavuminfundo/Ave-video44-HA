@@ -120,6 +120,40 @@ def test_start_audio_tx_reuses_ensure_audio_context() -> None:
     assert "new AudioContextClass()" not in body, "_startAudioTx must not duplicate AudioContext constructor"
 
 
+def test_set_config_resilient_render_try_catch() -> None:
+    """setConfig must wrap _renderBase() in try/catch to prevent unhandled exceptions causing Lovelace error card."""
+    card_js = CARD_PATH.read_text(encoding="utf-8")
+    body = _extract_method(card_js, "setConfig")
+    assert "try {" in body or "try{" in body, "setConfig must wrap renderBase in try block"
+    assert "this._renderBase()" in body, "setConfig must invoke _renderBase()"
+    assert "catch (err)" in body or "catch(err)" in body, "setConfig must catch error"
+    assert 'console.error("AVE Video V44 card render error:", err)' in body, (
+        "setConfig must log error to console.error"
+    )
+
+
+def test_lovelace_rebuild_shadow_dom_traversal() -> None:
+    """_triggerLovelaceRebuild must traverse shadowRoot and dispatch ll-rebuild to Lovelace view and error elements."""
+    card_js = CARD_PATH.read_text(encoding="utf-8")
+    assert 'const CARD_VERSION = "1.3.6";' in card_js, "Card version must be bumped to 1.3.6"
+    assert "function _triggerLovelaceRebuild(" in card_js, (
+        "_triggerLovelaceRebuild helper function must be defined"
+    )
+    for tag in ["HUI-ERROR-CARD", "HUI-VIEW", "HUI-MASONRY-VIEW", "HUI-ROOT", "HA-PANEL-LOVELACE"]:
+        assert tag in card_js, f"Shadow DOM traversal must target {tag}"
+
+    assert "shadowRoot" in card_js
+    assert "new Set(" in card_js or "new Set()" in card_js, "Must track visited elements with a Set"
+    assert 'CustomEvent("ll-rebuild"' in card_js, "Must dispatch ll-rebuild CustomEvent"
+    assert "window.dispatchEvent" in card_js, "Must dispatch ll-rebuild on window"
+    assert "document.dispatchEvent" in card_js, "Must dispatch ll-rebuild on document"
+    assert "setTimeout(_triggerLovelaceRebuild, 150)" in card_js, "Must schedule 150ms rebuild"
+    assert "setTimeout(_triggerLovelaceRebuild, 600)" in card_js, "Must schedule 600ms rebuild"
+    assert "visibilitychange" in card_js, "Must register visibilitychange listener"
+    assert "visibilityState" in card_js, "Must check document.visibilityState"
+
+
+
 if __name__ == "__main__":
     tests = [
         test_user_actions_ensure_audio_context_synchronously,
@@ -127,6 +161,8 @@ if __name__ == "__main__":
         test_call_intercom_order_service_before_rx_and_tx,
         test_play_incoming_pcm16_does_not_drop_or_reset_cursor_when_suspended,
         test_start_audio_tx_reuses_ensure_audio_context,
+        test_set_config_resilient_render_try_catch,
+        test_lovelace_rebuild_shadow_dom_traversal,
     ]
     failed = 0
     for t in tests:
@@ -142,3 +178,4 @@ if __name__ == "__main__":
     print(f"\nTotal: {len(tests)}, Failed: {failed}")
     if failed > 0:
         raise SystemExit(1)
+

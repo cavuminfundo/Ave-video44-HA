@@ -236,3 +236,11 @@
 - **Isolamento Sidetone Microfono**: In `ScriptProcessorNode`, azzerare sempre `e.outputBuffer.getChannelData(0).fill(0)` per disaccoppiare la cattura microfonica dall'output locale del browser ed eliminare feedback acustico e risonanze.
 - **WebSocket Fire-and-Forget**: Nei flussi real-time ad alta frequenza (50 fps audio), evitare l'invio sistematico di risposte JSON di ACK da parte di Home Assistant (`ack: false`), preservando l'event loop e le risorse della connessione.
 
+---
+
+## 2026-11-01 — v1.3.6 Companion App Lovelace Rebuild Traversal, Static Cache-Busting & Data-Only Update Guard
+
+### 28. Shadow DOM ll-rebuild Traversal, Versioned Cache Headers & Data-Only Update Guard
+- **Static Cache-Busting & Android WebView Timeout**: `StaticPathConfig(..., cache_headers=True)` combinato con `?v=1.3.6` previene il timeout di 2000ms di `customElements.whenDefined` su WebView Android sotto 5G/VPN garantendo caricamento istantaneo da cache e invalidazione deterministica ad ogni bump di versione.
+- **Shadow DOM ll-rebuild Traversal**: `window.dispatchEvent(new CustomEvent("ll-rebuild"))` non scende negli `shadowRoot` di Home Assistant: `_triggerLovelaceRebuild()` deve attraversare ricorsivamente gli `shadowRoot` da `document.body` per emettere `ll-rebuild` direttamente su `HUI-ERROR-CARD`, `HUI-VIEW`, `HUI-MASONRY-VIEW`, `HUI-ROOT` e `HA-PANEL-LOVELACE` (oltre a `visibilitychange`).
+- **Data-Only Update Guard in async_reload_entry**: `async_reload_entry` deve confrontare `dict(entry.options)` con le opzioni precedenti e saltare `hass.config_entries.async_reload` quando il coordinator aggiorna silenziosamente `token`/`session_id` in `entry.data`, evitando la distruzione temporanea delle entità durante l'uso.

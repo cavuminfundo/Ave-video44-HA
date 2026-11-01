@@ -16,6 +16,18 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.6 — 2026-11-01
+
+### 🇬🇧 English
+- **Companion App Lovelace Error Card Auto-Recovery**: Added `_triggerLovelaceRebuild()` in `ave-video44-card.js` to recursively traverse Home Assistant's Shadow DOM (`HUI-ERROR-CARD`, `HUI-VIEW`, `HUI-MASONRY-VIEW`, `HUI-ROOT`, `HA-PANEL-LOVELACE`) and dispatch `ll-rebuild` on initialization and `visibilitychange`, plus wrapped `setConfig` rendering in a defensive `try / catch`.
+- **HTTP Cache-Busting on Mobile WebViews**: Enabled `cache_headers=True` on `StaticPathConfig` paired with versioned query string `?v=1.3.6` to prevent the 2000ms `customElements.whenDefined` timeout over 5G/VPN connections.
+- **Non-Disruptive Token Refresh**: Guarded `async_reload_entry` in `__init__.py` to skip full integration reloads when only `entry.data` (`token`/`session_id`) is updated by the coordinator and `entry.options` remain unchanged.
+
+### 🇮🇹 Italiano
+- **Auto-ripristino "Errore di configurazione" su App Companion**: Aggiunto `_triggerLovelaceRebuild()` in `ave-video44-card.js` per attraversare ricorsivamente gli Shadow DOM di Home Assistant (`HUI-ERROR-CARD`, `HUI-VIEW`, `HUI-MASONRY-VIEW`, `HUI-ROOT`, `HA-PANEL-LOVELACE`) ed emettere `ll-rebuild` all'avvio e su `visibilitychange`, proteggendo inoltre `setConfig` con un blocco `try / catch`.
+- **Caching HTTP con Version-Busting su WebView Mobile**: Abilitato `cache_headers=True` su `StaticPathConfig` abbinato alla query string `?v=1.3.6` per evitare il timeout di 2000ms di Lovelace su reti 5G/VPN.
+- **Rinnovo Token senza Reload Distruttivo**: Protetto `async_reload_entry` in `__init__.py` per evitare lo smontaggio e il reload completo dell'integrazione quando il coordinator aggiorna silenziosamente `token`/`session_id` in `entry.data` senza modifiche a `entry.options`.
+
 ## v1.3.5 — 2026-10-31
 
 ### 🇬🇧 English

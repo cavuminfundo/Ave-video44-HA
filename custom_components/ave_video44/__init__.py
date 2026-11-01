@@ -39,7 +39,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.3.5"
+_CARD_VERSION = "1.3.6"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -49,23 +49,23 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.5"
+    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.6"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
 
-    # 1) Register static paths (both new and legacy for full cache bypass and backward compatibility)
+    # Register static paths with cache headers for instant WebView caching
     if hasattr(hass, "http") and hasattr(hass.http, "async_register_static_paths") and StaticPathConfig:
         try:
             await hass.http.async_register_static_paths([
                 StaticPathConfig(
                     path=str(card_path),
                     url_path=_CARD_URL,
-                    cache_headers=False,
+                    cache_headers=True,
                 ),
                 StaticPathConfig(
                     path=str(card_path),
                     url_path=_LEGACY_CARD_URL,
-                    cache_headers=False,
+                    cache_headers=True,
                 ),
             ])
             _LOGGER.debug("Registered static paths for %s and %s", _CARD_URL, _LEGACY_CARD_URL)
@@ -159,6 +159,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.runtime_data = coordinator
     hass.data.setdefault(DOMAIN, {}).setdefault("entries", {})[entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {}).setdefault("entry_options", {})[entry.entry_id] = dict(entry.options)
 
     if hasattr(hass.config_entries, "async_forward_entry_setups"):
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -270,6 +271,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await coordinator.async_shutdown()
 
         hass.data.get(DOMAIN, {}).get("entries", {}).pop(entry.entry_id, None)
+        hass.data.get(DOMAIN, {}).get("entry_options", {}).pop(entry.entry_id, None)
 
     return unload_ok
 
@@ -282,6 +284,16 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     ) or hass.data.get(DOMAIN, {}).get("entries", {}).get(entry.entry_id)
     if coordinator:
         coordinator.update_intercom_book()
+
+    entry_options = hass.data.setdefault(DOMAIN, {}).setdefault("entry_options", {})
+    prev_options = entry_options.get(entry.entry_id)
+    current_options = dict(entry.options)
+
+    if prev_options is not None and current_options == prev_options:
+        entry_options[entry.entry_id] = current_options
+        return
+
+    entry_options[entry.entry_id] = current_options
     await hass.config_entries.async_reload(entry.entry_id)
 
 

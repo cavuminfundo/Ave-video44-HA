@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.5";
+const CARD_VERSION = "1.3.6";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -74,7 +74,11 @@ class AveVideo44Card extends HTMLElement {
       title: "AVE Video V44",
       device_id: ""
     }, config || {});
-    this._renderBase();
+    try {
+      this._renderBase();
+    } catch (err) {
+      console.error("AVE Video V44 card render error:", err);
+    }
   }
 
   _autoResolveEntities(hass) {
@@ -1372,6 +1376,9 @@ class AveVideo44Card extends HTMLElement {
 
 if (!customElements.get("ave-video44-card")) {
   customElements.define("ave-video44-card", AveVideo44Card);
+  _triggerLovelaceRebuild();
+  setTimeout(_triggerLovelaceRebuild, 150);
+  setTimeout(_triggerLovelaceRebuild, 600);
 }
 
 class AveVideo44CardEditor extends HTMLElement {
@@ -1543,4 +1550,59 @@ if (!window.customCards.some(function(c) { return c.type === "ave-video44-card";
   });
 }
 
-window.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
+function _triggerLovelaceRebuild() {
+  const event = new CustomEvent("ll-rebuild", { bubbles: true, composed: true });
+  window.dispatchEvent(event);
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
+  }
+
+  const targetTags = new Set([
+    "HUI-ERROR-CARD",
+    "HUI-VIEW",
+    "HUI-MASONRY-VIEW",
+    "HUI-ROOT",
+    "HA-PANEL-LOVELACE"
+  ]);
+
+  const visited = new Set();
+
+  function walk(node) {
+    if (!node || visited.has(node)) return;
+    visited.add(node);
+
+    if (node.tagName && targetTags.has(node.tagName.toUpperCase())) {
+      try {
+        node.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
+      } catch (_e) {}
+    }
+
+    if (node.shadowRoot) {
+      walk(node.shadowRoot);
+    }
+
+    const children = node.children || node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) {
+        walk(children[i]);
+      }
+    }
+  }
+
+  if (typeof document !== "undefined" && document.body) {
+    walk(document.body);
+  }
+}
+
+_triggerLovelaceRebuild();
+setTimeout(_triggerLovelaceRebuild, 150);
+setTimeout(_triggerLovelaceRebuild, 600);
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", function() {
+    if (document.visibilityState === "visible") {
+      _triggerLovelaceRebuild();
+    }
+  });
+}
+
