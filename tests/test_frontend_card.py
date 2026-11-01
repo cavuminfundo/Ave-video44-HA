@@ -135,7 +135,7 @@ def test_set_config_resilient_render_try_catch() -> None:
 def test_lovelace_rebuild_shadow_dom_traversal() -> None:
     """_triggerLovelaceRebuild must traverse shadowRoot and dispatch ll-rebuild to Lovelace view and error elements."""
     card_js = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.6";' in card_js, "Card version must be bumped to 1.3.6"
+    assert 'const CARD_VERSION = "1.3.7";' in card_js, "Card version must be bumped to 1.3.7"
     assert "function _triggerLovelaceRebuild(" in card_js, (
         "_triggerLovelaceRebuild helper function must be defined"
     )

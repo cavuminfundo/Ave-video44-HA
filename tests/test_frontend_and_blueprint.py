@@ -535,15 +535,15 @@ def test_card_cleanup_disconnects_audio_nodes_and_clears_callbacks():
     )
 
 
-def test_card_version_bumped_1_3_6():
-    """Verify CARD_VERSION constant is bumped to 1.3.6."""
+def test_card_version_bumped_1_3_7():
+    """Verify CARD_VERSION constant is bumped to 1.3.7."""
     content = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.6";' in content
+    assert 'const CARD_VERSION = "1.3.7";' in content
     init_content = (REPO_ROOT / "custom_components" / "ave_video44" / "__init__.py").read_text(encoding="utf-8")
-    assert "?v=1.3.6" in init_content
+    assert "?v=1.3.7" in init_content
 
 
-test_card_version_bumped_1_3_5 = test_card_version_bumped_1_3_6
+test_card_version_bumped_1_3_6 = test_card_version_bumped_1_3_7
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,14 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.7 — 2026-11-01
+
+### 🇬🇧 English
+- **Local Brand Static Assets & HACS Update Icon Override**: Registered local brand static files (`/ave_video44_brand/icon.png` and `/ave_video44_brand/logo.png`) with `cache_headers=True`, and implemented an automatic `entity_picture` override in `homeassistant_customize` and an idempotent `EVENT_STATE_CHANGED` listener for `update.ave_video_v44_update` to prevent 404 missing icon warnings in HACS.
+
+### 🇮🇹 Italiano
+- **Asset Statici Brand Locale e Override Icona HACS Update**: Registrati i file statici del brand locale (`/ave_video44_brand/icon.png` e `/ave_video44_brand/logo.png`) con `cache_headers=True`, e implementato l'override automatico di `entity_picture` in `homeassistant_customize` e un listener idempotente su `EVENT_STATE_CHANGED` per `update.ave_video_v44_update` per risolvere l'icona mancante con errore 404 in HACS.
+
 ## v1.3.6 — 2026-11-01
 
 ### 🇬🇧 English

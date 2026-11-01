@@ -5,10 +5,19 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import homeassistant.helpers.config_validation as cv
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-import homeassistant.helpers.config_validation as cv
+
+try:
+    from homeassistant.const import EVENT_STATE_CHANGED
+except (ImportError, AttributeError):
+    EVENT_STATE_CHANGED = "state_changed"
+try:
+    from homeassistant.config import DATA_CUSTOMIZE
+except ImportError:
+    DATA_CUSTOMIZE = "homeassistant_customize"
 try:
     from homeassistant.components.http import StaticPathConfig
 except ImportError:
@@ -39,42 +48,109 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.3.6"
+_CARD_VERSION = "1.3.7"
+_BRAND_ICON_URL = "/ave_video44_brand/icon.png"
+_BRAND_LOGO_URL = "/ave_video44_brand/logo.png"
+_HACS_UPDATE_ENTITY_ID = "update.ave_video_v44_update"
+
+
+def _async_override_hacs_update_icon(hass: HomeAssistant) -> None:
+    """Override HACS update entity icon to point to local brand asset."""
+    hass.data.setdefault("homeassistant", {}).setdefault("customize", {}).setdefault(
+        _HACS_UPDATE_ENTITY_ID, {}
+    )["entity_picture"] = _BRAND_ICON_URL
+    hass.data.setdefault(DATA_CUSTOMIZE, {}).setdefault(_HACS_UPDATE_ENTITY_ID, {})[
+        "entity_picture"
+    ] = _BRAND_ICON_URL
+
+    if hasattr(hass, "states") and hass.states:
+        state = hass.states.get(_HACS_UPDATE_ENTITY_ID)
+        if state is not None:
+            attrs = getattr(state, "attributes", {})
+            if attrs.get("entity_picture") != _BRAND_ICON_URL:
+                new_attrs = dict(attrs)
+                new_attrs["entity_picture"] = _BRAND_ICON_URL
+                state_val = getattr(state, "state", "")
+                hass.states.async_set(_HACS_UPDATE_ENTITY_ID, state_val, new_attrs)
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if not domain_data.get("hacs_icon_listener_registered") and hasattr(hass, "bus"):
+        domain_data["hacs_icon_listener_registered"] = True
+
+        def _hacs_icon_state_listener(event: Any) -> None:
+            data = getattr(event, "data", {}) if event else {}
+            if data.get("entity_id") != _HACS_UPDATE_ENTITY_ID:
+                return
+            new_state = data.get("new_state")
+            if new_state is None:
+                return
+            attrs = getattr(new_state, "attributes", {})
+            if attrs.get("entity_picture") != _BRAND_ICON_URL:
+                new_attrs = dict(attrs)
+                new_attrs["entity_picture"] = _BRAND_ICON_URL
+                state_val = getattr(new_state, "state", "")
+                hass.states.async_set(_HACS_UPDATE_ENTITY_ID, state_val, new_attrs)
+
+        hass.bus.async_listen(EVENT_STATE_CHANGED, _hacs_icon_state_listener)
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Register frontend card static path, extra JS URL, and Lovelace storage resource."""
+    _async_override_hacs_update_icon(hass)
+
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get("card_registered"):
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.6"
+    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.7"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
+    brand_dir = Path(__file__).parent / "brand"
+    icon_path = brand_dir / "icon.png"
+    logo_path = brand_dir / "logo.png"
 
     # Register static paths with cache headers for instant WebView caching
-    if hasattr(hass, "http") and hasattr(hass.http, "async_register_static_paths") and StaticPathConfig:
+    if (
+        hasattr(hass, "http")
+        and hasattr(hass.http, "async_register_static_paths")
+        and StaticPathConfig
+    ):
         try:
-            await hass.http.async_register_static_paths([
-                StaticPathConfig(
-                    path=str(card_path),
-                    url_path=_CARD_URL,
-                    cache_headers=True,
-                ),
-                StaticPathConfig(
-                    path=str(card_path),
-                    url_path=_LEGACY_CARD_URL,
-                    cache_headers=True,
-                ),
-            ])
-            _LOGGER.debug("Registered static paths for %s and %s", _CARD_URL, _LEGACY_CARD_URL)
+            await hass.http.async_register_static_paths(
+                [
+                    StaticPathConfig(
+                        path=str(card_path),
+                        url_path=_CARD_URL,
+                        cache_headers=True,
+                    ),
+                    StaticPathConfig(
+                        path=str(card_path),
+                        url_path=_LEGACY_CARD_URL,
+                        cache_headers=True,
+                    ),
+                    StaticPathConfig(
+                        path=str(icon_path),
+                        url_path=_BRAND_ICON_URL,
+                        cache_headers=True,
+                    ),
+                    StaticPathConfig(
+                        path=str(logo_path),
+                        url_path=_BRAND_LOGO_URL,
+                        cache_headers=True,
+                    ),
+                ]
+            )
+            _LOGGER.debug(
+                "Registered static paths for %s and %s", _CARD_URL, _LEGACY_CARD_URL
+            )
         except Exception as err:
             _LOGGER.debug("Could not register static path: %s", err)
 
     # 2) Call add_extra_js_url
     try:
         from homeassistant.components.frontend import add_extra_js_url
+
         add_extra_js_url(hass, resource_url)
     except Exception as err:
         _LOGGER.debug("Could not call add_extra_js_url: %s", err)
@@ -84,20 +160,29 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         lovelace = hass.data.get("lovelace")
         resources = getattr(lovelace, "resources", None) if lovelace else None
         if resources is not None:
-            if hasattr(resources, "loaded") and not resources.loaded and hasattr(resources, "async_load"):
+            if (
+                hasattr(resources, "loaded")
+                and not resources.loaded
+                and hasattr(resources, "async_load")
+            ):
                 await resources.async_load()
             if hasattr(resources, "async_items"):
                 existing = [
-                    item for item in resources.async_items()
+                    item
+                    for item in resources.async_items()
                     if str(item.get("url", "")).startswith(_CARD_URL)
                     or str(item.get("url", "")).startswith(_LEGACY_CARD_URL)
                 ]
                 if not existing and hasattr(resources, "async_create_item"):
-                    await resources.async_create_item({"res_type": "module", "url": resource_url})
+                    await resources.async_create_item(
+                        {"res_type": "module", "url": resource_url}
+                    )
                 elif existing and hasattr(resources, "async_update_item"):
                     for item in existing:
                         if item.get("url") != resource_url and "id" in item:
-                            await resources.async_update_item(item["id"], {"res_type": "module", "url": resource_url})
+                            await resources.async_update_item(
+                                item["id"], {"res_type": "module", "url": resource_url}
+                            )
     except Exception as err:
         _LOGGER.debug("Could not auto-register Lovelace resource: %s", err)
 
@@ -128,7 +213,9 @@ async def _async_disable_duplicate_unlock_buttons(
             entry_id = getattr(reg_entry, "config_entry_id", None)
             unique_id = getattr(reg_entry, "unique_id", "")
             if entry_id == entry.entry_id or unique_id.startswith(f"{entry.entry_id}_"):
-                if unique_id.endswith("_btn_unlock_1") or unique_id.endswith("_btn_unlock_2"):
+                if unique_id.endswith("_btn_unlock_1") or unique_id.endswith(
+                    "_btn_unlock_2"
+                ):
                     if reg_entry.disabled_by is None:
                         entries_to_disable.append(reg_entry.entity_id)
 
@@ -147,6 +234,7 @@ async def _async_disable_duplicate_unlock_buttons(
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AVE Video V44 from a config entry."""
     await _async_register_card(hass)
+    _async_override_hacs_update_icon(hass)
 
     coordinator = AveVideo44Coordinator(hass, entry)
 
@@ -158,8 +246,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_start()
 
     entry.runtime_data = coordinator
-    hass.data.setdefault(DOMAIN, {}).setdefault("entries", {})[entry.entry_id] = coordinator
-    hass.data.setdefault(DOMAIN, {}).setdefault("entry_options", {})[entry.entry_id] = dict(entry.options)
+    hass.data.setdefault(DOMAIN, {}).setdefault("entries", {})[entry.entry_id] = (
+        coordinator
+    )
+    hass.data.setdefault(DOMAIN, {}).setdefault("entry_options", {})[entry.entry_id] = (
+        dict(entry.options)
+    )
 
     if hasattr(hass.config_entries, "async_forward_entry_setups"):
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -190,22 +282,29 @@ def _sync_storage_files(storage_dir: Path, enable_sidebar: bool) -> None:
             items = dash_content.get("data", {}).get("items", [])
             updated = False
             for item in items:
-                if item.get("id") == "ave_video44" or item.get("url_path") == "ave-video44":
+                if (
+                    item.get("id") == "ave_video44"
+                    or item.get("url_path") == "ave-video44"
+                ):
                     item["show_in_sidebar"] = bool(enable_sidebar)
                     item["mode"] = "storage"
                     updated = True
                     break
             if not updated and enable_sidebar:
-                items.append({
-                    "id": "ave_video44",
-                    "show_in_sidebar": True,
-                    "icon": "mdi:doorbell-video",
-                    "title": "Videocitofono",
-                    "require_admin": False,
-                    "mode": "storage",
-                    "url_path": "ave-video44",
-                })
-            dashboards_file.write_text(json.dumps(dash_content, indent=2), encoding="utf-8")
+                items.append(
+                    {
+                        "id": "ave_video44",
+                        "show_in_sidebar": True,
+                        "icon": "mdi:doorbell-video",
+                        "title": "Videocitofono",
+                        "require_admin": False,
+                        "mode": "storage",
+                        "url_path": "ave-video44",
+                    }
+                )
+            dashboards_file.write_text(
+                json.dumps(dash_content, indent=2), encoding="utf-8"
+            )
         except Exception as d_err:
             _LOGGER.debug("Could not update lovelace_dashboards: %s", d_err)
 
@@ -218,12 +317,18 @@ def _sync_storage_files(storage_dir: Path, enable_sidebar: bool) -> None:
                 # Remove "type": "panel" so Lovelace uses standard hui-masonry-view
                 # which natively handles "ll-rebuild" on F5 reload without error card trapping
                 views[0].pop("type", None)
-                ave_dash_file.write_text(json.dumps(ave_content, indent=2), encoding="utf-8")
+                ave_dash_file.write_text(
+                    json.dumps(ave_content, indent=2), encoding="utf-8"
+                )
         except Exception as a_err:
-            _LOGGER.debug("Could not update lovelace.ave_video44 view to masonry: %s", a_err)
+            _LOGGER.debug(
+                "Could not update lovelace.ave_video44 view to masonry: %s", a_err
+            )
 
 
-async def _async_sync_sidebar_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_sync_sidebar_dashboard(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Sync native Lovelace storage dashboard panel and sidebar visibility."""
     try:
         enable_sidebar = entry.options.get(
@@ -234,8 +339,11 @@ async def _async_sync_sidebar_dashboard(hass: HomeAssistant, entry: ConfigEntry)
         if not enable_sidebar:
             try:
                 from homeassistant.components import frontend
+
                 if hasattr(frontend, "async_remove_panel"):
-                    frontend.async_remove_panel(hass, "ave-video44", warn_if_unknown=False)
+                    frontend.async_remove_panel(
+                        hass, "ave-video44", warn_if_unknown=False
+                    )
             except Exception as fe_err:
                 _LOGGER.debug("Could not remove frontend panel: %s", fe_err)
 
@@ -247,7 +355,9 @@ async def _async_sync_sidebar_dashboard(hass: HomeAssistant, entry: ConfigEntry)
         storage_dir = config_dir / ".storage"
 
         if hasattr(hass, "async_add_executor_job"):
-            job = hass.async_add_executor_job(_sync_storage_files, storage_dir, bool(enable_sidebar))
+            job = hass.async_add_executor_job(
+                _sync_storage_files, storage_dir, bool(enable_sidebar)
+            )
             if asyncio.iscoroutine(job):
                 await job
         else:

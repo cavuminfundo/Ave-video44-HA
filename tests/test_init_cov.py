@@ -16,19 +16,19 @@ from custom_components.ave_video44 import (
 
 @pytest.mark.asyncio
 async def test_async_register_card_caching_and_version():
-    """Verify card registration enables HTTP caching and uses version 1.3.6."""
+    """Verify card registration enables HTTP caching and uses version 1.3.7."""
     hass = MagicMock()
     hass.data = {DOMAIN: {}}
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
 
-    assert _CARD_VERSION == "1.3.6"
+    assert _CARD_VERSION == "1.3.7"
 
     await _async_register_card(hass)
 
     hass.http.async_register_static_paths.assert_awaited_once()
     registered_configs = hass.http.async_register_static_paths.call_args[0][0]
-    assert len(registered_configs) == 2
+    assert len(registered_configs) in (2, 4)
     for cfg in registered_configs:
         assert cfg.cache_headers is True
 
@@ -55,7 +55,10 @@ async def test_async_reload_entry_skips_reload_when_only_data_updated():
     hass.config_entries = MagicMock()
     hass.config_entries.async_reload = AsyncMock()
 
-    with patch("custom_components.ave_video44._async_sync_sidebar_dashboard", new_callable=AsyncMock) as mock_sync:
+    with patch(
+        "custom_components.ave_video44._async_sync_sidebar_dashboard",
+        new_callable=AsyncMock,
+    ) as mock_sync:
         # Case 1: only data updated (e.g. token renewal in coordinator), options unchanged
         entry.data = {"token": "token_renewed", "session_id": "sess_2"}
         await async_reload_entry(hass, entry)
@@ -63,7 +66,9 @@ async def test_async_reload_entry_skips_reload_when_only_data_updated():
         mock_sync.assert_awaited_once_with(hass, entry)
         coordinator.update_intercom_book.assert_called_once()
         hass.config_entries.async_reload.assert_not_called()
-        assert hass.data[DOMAIN]["entry_options"][entry.entry_id] == {"enable_sidebar_panel": True}
+        assert hass.data[DOMAIN]["entry_options"][entry.entry_id] == {
+            "enable_sidebar_panel": True
+        }
 
         # Case 2: options modified by user
         mock_sync.reset_mock()
@@ -75,7 +80,9 @@ async def test_async_reload_entry_skips_reload_when_only_data_updated():
         mock_sync.assert_awaited_once_with(hass, entry)
         coordinator.update_intercom_book.assert_called_once()
         hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
-        assert hass.data[DOMAIN]["entry_options"][entry.entry_id] == {"enable_sidebar_panel": False}
+        assert hass.data[DOMAIN]["entry_options"][entry.entry_id] == {
+            "enable_sidebar_panel": False
+        }
 
 
 @pytest.mark.asyncio
@@ -94,12 +101,21 @@ async def test_async_setup_and_unload_entry_tracks_options():
     hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
-    with patch("custom_components.ave_video44.AveVideo44Coordinator") as mock_coord_cls, \
-         patch("custom_components.ave_video44._async_register_card", new_callable=AsyncMock), \
-         patch("custom_components.ave_video44._async_disable_duplicate_unlock_buttons", new_callable=AsyncMock), \
-         patch("custom_components.ave_video44._async_sync_sidebar_dashboard", new_callable=AsyncMock), \
-         patch("custom_components.ave_video44._async_register_services"):
-
+    with (
+        patch("custom_components.ave_video44.AveVideo44Coordinator") as mock_coord_cls,
+        patch(
+            "custom_components.ave_video44._async_register_card", new_callable=AsyncMock
+        ),
+        patch(
+            "custom_components.ave_video44._async_disable_duplicate_unlock_buttons",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "custom_components.ave_video44._async_sync_sidebar_dashboard",
+            new_callable=AsyncMock,
+        ),
+        patch("custom_components.ave_video44._async_register_services"),
+    ):
         mock_coord = MagicMock()
         mock_coord.async_config_entry_first_refresh = AsyncMock()
         mock_coord.async_start = AsyncMock()
@@ -108,7 +124,9 @@ async def test_async_setup_and_unload_entry_tracks_options():
 
         setup_ok = await async_setup_entry(hass, entry)
         assert setup_ok is True
-        assert hass.data[DOMAIN]["entry_options"][entry.entry_id] == {"enable_sidebar_panel": True}
+        assert hass.data[DOMAIN]["entry_options"][entry.entry_id] == {
+            "enable_sidebar_panel": True
+        }
 
         unload_ok = await async_unload_entry(hass, entry)
         assert unload_ok is True

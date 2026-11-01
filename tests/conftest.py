@@ -136,6 +136,7 @@ def _ensure_ha_stubs():
     const_mod.STATE_UNLOCKED = "unlocked"
     const_mod.ATTR_DEVICE_ID = "device_id"
     const_mod.ATTR_ENTITY_ID = "entity_id"
+    const_mod.EVENT_STATE_CHANGED = "state_changed"
 
     class HomeAssistantError(Exception): pass
     class ConfigEntryNotReady(HomeAssistantError): pass
