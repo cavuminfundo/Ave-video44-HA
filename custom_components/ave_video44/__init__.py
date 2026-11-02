@@ -48,7 +48,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.3.7"
+_CARD_VERSION = "1.3.8"
 _BRAND_ICON_URL = "/ave_video44_brand/icon.png"
 _BRAND_LOGO_URL = "/ave_video44_brand/logo.png"
 _HACS_UPDATE_ENTITY_ID = "update.ave_video_v44_update"
@@ -103,14 +103,17 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     domain_data["card_registered"] = True
 
-    resource_url = "/ave_video44_card/ave-video44-card.js?v=1.3.7"
+    resource_url = f"{_CARD_URL}?v={_CARD_VERSION}"
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ave-video44-card.js"
     brand_dir = Path(__file__).parent / "brand"
     icon_path = brand_dir / "icon.png"
     logo_path = brand_dir / "logo.png"
+    card_path_str = str(card_path)
+    icon_path_str = str(icon_path)
+    logo_path_str = str(logo_path)
 
-    # Register static paths with cache headers for instant WebView caching
+    # ponytail: disable 31-day HTTP cache so WebView and browsers pick up updated card bundles immediately
     if (
         hasattr(hass, "http")
         and hasattr(hass.http, "async_register_static_paths")
@@ -120,23 +123,23 @@ async def _async_register_card(hass: HomeAssistant) -> None:
             await hass.http.async_register_static_paths(
                 [
                     StaticPathConfig(
-                        path=str(card_path),
                         url_path=_CARD_URL,
-                        cache_headers=True,
+                        path=card_path_str,
+                        cache_headers=False,
                     ),
                     StaticPathConfig(
-                        path=str(card_path),
                         url_path=_LEGACY_CARD_URL,
-                        cache_headers=True,
+                        path=card_path_str,
+                        cache_headers=False,
                     ),
                     StaticPathConfig(
-                        path=str(icon_path),
                         url_path=_BRAND_ICON_URL,
+                        path=icon_path_str,
                         cache_headers=True,
                     ),
                     StaticPathConfig(
-                        path=str(logo_path),
                         url_path=_BRAND_LOGO_URL,
+                        path=logo_path_str,
                         cache_headers=True,
                     ),
                 ]

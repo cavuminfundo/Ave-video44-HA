@@ -16,6 +16,16 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.8 — 2026-11-02
+
+### 🇬🇧 English
+- **Fix Lovelace "Configuration Error" on Mobile & Web**: Removed recursive Shadow DOM `ll-rebuild` event storm dispatched against container elements (`HUI-VIEW`, `HUI-MASONRY-VIEW`, `HUI-ROOT`, `HA-PANEL-LOVELACE`, `HUI-ERROR-CARD`), restoring standard Lovelace card lifecycle.
+- **HTTP Cache Control**: Disabled 31-day HTTP cache headers (`cache_headers=False`) on frontend card bundle endpoints (`_CARD_URL` and `_LEGACY_CARD_URL`) paired with SemVer query busting `?v=1.3.8` so Companion App WebViews and browsers load updated card bundles immediately.
+
+### 🇮🇹 Italiano
+- **Risoluzione "Errore di configurazione" Lovelace su Mobile e Web**: Rimossa la tempesta di eventi `ll-rebuild` emessi ricorsivamente contro i container dello Shadow DOM (`HUI-VIEW`, `HUI-MASONRY-VIEW`, `HUI-ROOT`, `HA-PANEL-LOVELACE`, `HUI-ERROR-CARD`), ripristinando il normale ciclo di vita della card Lovelace.
+- **Controllo Cache HTTP**: Disabilitati gli header di caching HTTP a 31 giorni (`cache_headers=False`) sugli endpoint dei bundle frontend (`_CARD_URL` e `_LEGACY_CARD_URL`) abbinati al query busting SemVer `?v=1.3.8`, garantendo che l'app Companion e i browser ricevano immediatamente gli aggiornamenti della card.
+
 ## v1.3.7 — 2026-11-01
 
 ### 🇬🇧 English

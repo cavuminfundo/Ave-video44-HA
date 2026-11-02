@@ -16,13 +16,20 @@ from custom_components.ave_video44 import (
 
 @pytest.mark.asyncio
 async def test_async_register_card_caching_and_version():
-    """Verify card registration enables HTTP caching and uses version 1.3.7."""
+    """Verify card registration disables card HTTP caching and uses version 1.3.8."""
+    fake_resources = MagicMock()
+    fake_resources.loaded = True
+    fake_resources.async_items = MagicMock(return_value=[])
+    fake_resources.async_create_item = AsyncMock()
+    fake_lovelace = MagicMock()
+    fake_lovelace.resources = fake_resources
+
     hass = MagicMock()
-    hass.data = {DOMAIN: {}}
+    hass.data = {DOMAIN: {}, "lovelace": fake_lovelace}
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
 
-    assert _CARD_VERSION == "1.3.7"
+    assert _CARD_VERSION == "1.3.8"
 
     await _async_register_card(hass)
 
@@ -30,7 +37,15 @@ async def test_async_register_card_caching_and_version():
     registered_configs = hass.http.async_register_static_paths.call_args[0][0]
     assert len(registered_configs) in (2, 4)
     for cfg in registered_configs:
-        assert cfg.cache_headers is True
+        if cfg.url_path in ("/ave_video44_card/ave-video44-card.js", "/ave_video44_frontend/ave-video44-card.js"):
+            assert cfg.cache_headers is False
+        elif cfg.url_path in ("/ave_video44_brand/icon.png", "/ave_video44_brand/logo.png"):
+            assert cfg.cache_headers is True
+
+    fake_resources.async_create_item.assert_awaited_once()
+    registered_item = fake_resources.async_create_item.call_args[0][0]
+    assert "?v=1.3.8" in registered_item["url"]
+    assert registered_item["url"] == "/ave_video44_card/ave-video44-card.js?v=1.3.8"
 
 
 @pytest.mark.asyncio

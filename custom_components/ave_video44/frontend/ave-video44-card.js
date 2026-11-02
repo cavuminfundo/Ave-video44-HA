@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.7";
+const CARD_VERSION = "1.3.8";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -168,7 +168,7 @@ class AveVideo44Card extends HTMLElement {
   _expandMasonryColumn() {
     try {
       let el = this.parentElement;
-      while (el && el.tagName !== "HUI-MASONRY-VIEW") {
+      while (el && !el.tagName.toLowerCase().endsWith("-view")) {
         if (el.classList && el.classList.contains("column")) {
           const cols = el.parentElement;
           if (cols && cols.id === "columns" && cols.children.length === 1) {
@@ -1374,13 +1374,6 @@ class AveVideo44Card extends HTMLElement {
   }
 }
 
-if (!customElements.get("ave-video44-card")) {
-  customElements.define("ave-video44-card", AveVideo44Card);
-  _triggerLovelaceRebuild();
-  setTimeout(_triggerLovelaceRebuild, 150);
-  setTimeout(_triggerLovelaceRebuild, 600);
-}
-
 class AveVideo44CardEditor extends HTMLElement {
   constructor() {
     super();
@@ -1540,69 +1533,19 @@ if (!customElements.get("ave-video44-card-editor")) {
   customElements.define("ave-video44-card-editor", AveVideo44CardEditor);
 }
 
+// ponytail: platform-native customElements lifecycle, upgrade if HA introduces new card registration API
+if (!customElements.get("ave-video44-card")) {
+  customElements.define("ave-video44-card", AveVideo44Card);
+  window.dispatchEvent(new CustomEvent("ll-rebuild"));
+}
+
 window.customCards = window.customCards || [];
-if (!window.customCards.some(function(c) { return c.type === "ave-video44-card"; })) {
+if (!window.customCards.some((card) => card.type === "ave-video44-card")) {
   window.customCards.push({
     type: "ave-video44-card",
-    name: "AVE Video V44 Card",
+    name: "AVE Video V44 Intercom Card",
+    description: "Interfaccia videocitofonica con video RTSP/WebRTC, audio bidirezionale, apriporta e interfono.",
     preview: true,
-    description: "Card Lovelace interattiva per videocitofoni AVE Video V44 con audio full-duplex WebAudio."
-  });
-}
-
-function _triggerLovelaceRebuild() {
-  const event = new CustomEvent("ll-rebuild", { bubbles: true, composed: true });
-  window.dispatchEvent(event);
-  if (typeof document !== "undefined") {
-    document.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
-  }
-
-  const targetTags = new Set([
-    "HUI-ERROR-CARD",
-    "HUI-VIEW",
-    "HUI-MASONRY-VIEW",
-    "HUI-ROOT",
-    "HA-PANEL-LOVELACE"
-  ]);
-
-  const visited = new Set();
-
-  function walk(node) {
-    if (!node || visited.has(node)) return;
-    visited.add(node);
-
-    if (node.tagName && targetTags.has(node.tagName.toUpperCase())) {
-      try {
-        node.dispatchEvent(new CustomEvent("ll-rebuild", { bubbles: true, composed: true }));
-      } catch (_e) {}
-    }
-
-    if (node.shadowRoot) {
-      walk(node.shadowRoot);
-    }
-
-    const children = node.children || node.childNodes;
-    if (children) {
-      for (let i = 0; i < children.length; i++) {
-        walk(children[i]);
-      }
-    }
-  }
-
-  if (typeof document !== "undefined" && document.body) {
-    walk(document.body);
-  }
-}
-
-_triggerLovelaceRebuild();
-setTimeout(_triggerLovelaceRebuild, 150);
-setTimeout(_triggerLovelaceRebuild, 600);
-
-if (typeof document !== "undefined") {
-  document.addEventListener("visibilitychange", function() {
-    if (document.visibilityState === "visible") {
-      _triggerLovelaceRebuild();
-    }
   });
 }
 
