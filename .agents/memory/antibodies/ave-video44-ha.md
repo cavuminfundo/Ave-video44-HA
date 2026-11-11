@@ -20,3 +20,10 @@
 - **Invariant**: Mascherare sempre le credenziali in `rtsp_url` prima dell'invio via WebSocket, imporre `MAX_SIP_HEADER_BYTES`/`MAX_SIP_CONTENT_LENGTH` in `_read_sip_msg`, filtrare gli IP sorgente UDP con `_is_trusted_udp_source`, ed eseguire sempre l'intera suite `pytest` prima di ogni `git commit` / `git push`.
 - **onFailure Mandate**: Scartare i frame UDP da IP non autorizzati e svuotare `_rx_buf` sollevando `ValueError` su messaggi SIP fuori limite.
 - **Forbidden Regex**: `send_result\([^)]*"rtsp_url"\s*:\s*rtsp_url\s*\)`
+
+## [AB-AVE-004] CI `requirements_test.txt` Parity & `conftest.py` Voluptuous Stub Drift
+- **Target Files**: `requirements_test.txt`, `pyproject.toml`, `tests/conftest.py`, `tests/test_repo_governance.py`
+- **Root Cause**: L'uso di flag ad-hoc `uv run --with <pkg>` (o pacchetti già presenti in `.venv`) nasconde localmente l'assenza di dipendenze terze parti in `requirements_test.txt`, causando il fallimento della GitHub Action `Validate` (`pip install -r requirements_test.txt`) o l'attivazione di stub incompleti in `tests/conftest.py` (es. `vol.All` / `vol.Length`).
+- **Invariant**: Ogni libreria terza parte importata in `custom_components/` o `tests/` deve essere dichiarata sia in `requirements_test.txt` sia in `pyproject.toml`, verificata via AST in `test_ci_requirements_test_parity_with_imports()`, e i test pre-commit devono girare con `uv run --isolated --no-project --with-requirements requirements_test.txt pytest`.
+- **onFailure Mandate**: Bloccare il commit se `test_ci_requirements_test_parity_with_imports` o `test_conftest_voluptuous_fallback_stub_contract` falliscono.
+- **Forbidden Regex**: `vol_mod\.Schema\s*=\s*lambda`

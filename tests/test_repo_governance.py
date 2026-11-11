@@ -240,4 +240,86 @@ async def test_async_register_card_registers_lovelace_resource():
     assert hass.data[DOMAIN]["card_registered"] is True
 
 
+def test_ci_requirements_test_parity_with_imports():
+    """Ensure every third-party library imported in custom_components/ or tests/ is in requirements_test.txt and pyproject.toml."""
+    import ast
+    import sys
+
+    import_to_pkg = {
+        "aiohttp": "aiohttp",
+        "paho": "paho-mqtt",
+        "yaml": "pyyaml",
+        "cryptography": "cryptography",
+        "voluptuous": "voluptuous",
+        "pytest": "pytest",
+        "pytest_asyncio": "pytest-asyncio",
+    }
+    stdlib = sys.stdlib_module_names | {"custom_components", "tests", "homeassistant", "haffmpeg", "conftest"}
+
+    discovered_pkgs = set()
+    for folder in (ROOT / "custom_components" / "ave_video44", ROOT / "tests"):
+        for py_file in folder.rglob("*.py"):
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        top = alias.name.split(".")[0]
+                        if top not in stdlib:
+                            assert top in import_to_pkg, f"Unmapped third-party import '{top}' in {py_file.relative_to(ROOT)}"
+                            discovered_pkgs.add(import_to_pkg[top])
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    top = node.module.split(".")[0]
+                    if top not in stdlib:
+                        assert top in import_to_pkg, f"Unmapped third-party import '{top}' in {py_file.relative_to(ROOT)}"
+                        discovered_pkgs.add(import_to_pkg[top])
+
+    reqs_lines = [
+        re.split(r"[><=~!]", line.strip())[0].strip().lower()
+        for line in (ROOT / "requirements_test.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pyproject_deps = [
+        re.split(r"[><=~!]", dep.strip())[0].strip().lower()
+        for dep in (
+            pyproject["project"].get("dependencies", [])
+            + pyproject["project"].get("optional-dependencies", {}).get("test", [])
+        )
+    ]
+
+    for pkg in sorted(discovered_pkgs):
+        assert pkg in reqs_lines, f"Third-party package '{pkg}' is imported in codebase/tests but missing from requirements_test.txt (CI will fail!)"
+        assert pkg in pyproject_deps, f"Third-party package '{pkg}' is missing from pyproject.toml dependencies/test"
+
+
+def test_conftest_voluptuous_fallback_stub_contract():
+    """Ensure the fallback voluptuous stub in tests/conftest.py supports all schema validators used in production."""
+    from tests.conftest import _build_voluptuous_stub
+
+    vol_stub = _build_voluptuous_stub()
+    for attr in ("Invalid", "Schema", "Required", "Optional", "In", "Any", "Coerce", "All", "Length"):
+        assert hasattr(vol_stub, attr), f"Fallback voluptuous stub missing '{attr}'"
+
+    schema = vol_stub.Schema(
+        {
+            vol_stub.Required("payload"): vol_stub.All(str, vol_stub.Length(min=1, max=5)),
+            vol_stub.Optional("action", default="unlock"): vol_stub.In(["unlock", "monitor"]),
+            vol_stub.Optional("lock_id", default=1): vol_stub.All(vol_stub.Coerce(int), vol_stub.In([1, 2])),
+        }
+    )
+    valid = schema({"payload": "abc", "action": "monitor", "lock_id": "2"})
+    assert valid["payload"] == "abc"
+    assert valid["lock_id"] == 2
+
+    with pytest.raises(vol_stub.Invalid):
+        schema({"payload": ""})
+    with pytest.raises(vol_stub.Invalid):
+        schema({"payload": "too_long"})
+    with pytest.raises(vol_stub.Invalid):
+        schema({"payload": "ok", "action": "evil"})
+    with pytest.raises(vol_stub.Invalid):
+        schema({"payload": "ok", "lock_id": 99})
+
+
+
 

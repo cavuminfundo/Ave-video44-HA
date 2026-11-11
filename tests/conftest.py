@@ -1,6 +1,5 @@
 """Common fixtures for AVE Video V44 tests."""
 
-import asyncio
 import sys
 from types import ModuleType
 from typing import Any
@@ -8,22 +7,105 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+def _build_voluptuous_stub() -> ModuleType:
+    vol_mod = ModuleType("voluptuous")
+
+    class Invalid(Exception):
+        pass
+
+    class _Marker:
+        def __init__(self, key, default=None, required=False):
+            self.key = key
+            self.default = default
+            self.required = required
+
+        def __hash__(self):
+            return hash(self.key)
+
+        def __eq__(self, other):
+            return self.key == (other.key if isinstance(other, _Marker) else other)
+
+    def _apply_validator(validator, val):
+        if isinstance(validator, type):
+            if not isinstance(val, validator):
+                raise Invalid(f"Expected {validator.__name__}")
+            return val
+        if callable(validator):
+            return validator(val)
+        return val
+
+    class Schema:
+        def __init__(self, schema, extra=None):
+            self.schema = schema
+            self.extra = extra
+
+        def __call__(self, data):
+            if not isinstance(self.schema, dict) or not isinstance(data, dict):
+                return _apply_validator(self.schema, data)
+            out = dict(data)
+            for marker, validator in self.schema.items():
+                key = marker.key if isinstance(marker, _Marker) else marker
+                required = marker.required if isinstance(marker, _Marker) else False
+                default = marker.default if isinstance(marker, _Marker) else None
+                if key in out:
+                    out[key] = _apply_validator(validator, out[key])
+                elif required:
+                    raise Invalid(f"Missing required key: {key}")
+                elif default is not None:
+                    out[key] = default
+            return out
+
+    def _in(items):
+        def _validate(val):
+            if val not in items:
+                raise Invalid(f"{val!r} not in {items!r}")
+            return val
+        return _validate
+
+    def _coerce(target_type):
+        def _validate(val):
+            try:
+                return target_type(val)
+            except (ValueError, TypeError) as err:
+                raise Invalid(str(err)) from err
+        return _validate
+
+    def _all(*validators):
+        def _validate(val):
+            for v in validators:
+                val = _apply_validator(v, val)
+            return val
+        return _validate
+
+    def _length(min=None, max=None):
+        def _validate(val):
+            n = len(val)
+            if min is not None and n < min:
+                raise Invalid(f"length {n} < {min}")
+            if max is not None and n > max:
+                raise Invalid(f"length {n} > {max}")
+            return val
+        return _validate
+
+    vol_mod.Invalid = Invalid
+    vol_mod.ALLOW_EXTRA = "allow_extra"
+    vol_mod.Schema = Schema
+    vol_mod.Required = lambda k, default=None: _Marker(k, default=default, required=True)
+    vol_mod.Optional = lambda k, default=None: _Marker(k, default=default, required=False)
+    vol_mod.In = _in
+    vol_mod.Any = lambda *args: lambda val: val
+    vol_mod.Coerce = _coerce
+    vol_mod.All = _all
+    vol_mod.Length = _length
+    return vol_mod
+
+
 # Voluptuous stub if not present
 try:
-    import voluptuous as vol
+    import voluptuous  # noqa: F401
 except ImportError:
-    vol_mod = ModuleType("voluptuous")
-    class Schema:
-        def __init__(self, schema): self.schema = schema
-        def __call__(self, val): return val
-    vol_mod.Schema = Schema
-    vol_mod.Required = lambda k, default=None: k
-    vol_mod.Optional = lambda k, default=None: k
-    vol_mod.In = lambda items: items
-    vol_mod.Any = lambda *args: lambda val: val
-    vol_mod.Coerce = lambda t: lambda val: val
+    vol_mod = _build_voluptuous_stub()
     sys.modules.setdefault("voluptuous", vol_mod)
-    import voluptuous as vol
 
 def _ensure_ha_stubs():
     if "homeassistant" in sys.modules and not isinstance(sys.modules["homeassistant"], MagicMock):

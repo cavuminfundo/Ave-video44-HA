@@ -46,7 +46,7 @@ Code first. Then at most three short lines: what was skipped, when to add it. No
 
 ### 5. Mandatory Release, Versioning & Changelog Policy (Mandatory on Commit & Push)
 Ad ogni `git commit` e `git push` su `main`, l'agente DEVE:
-0. **Obbligo Tassativo di Esecuzione Completa dei Test Prima di Commit e Push**: È **TASSATIVAMENTE VIETATO** eseguire `git commit` o `git push` senza aver prima eseguito nella sessione corrente l'intera suite di test (`uv run --with pytest pytest -q --tb=short --maxfail=2`) e i controlli di linting (`uv run ruff check custom_components/ tests/` e `uv run ruff format --check custom_components/ tests/`) verificando che terminino con **100% PASS (exit code 0)**. Se anche un solo test fallisce, il commit e il push sono bloccati fino alla risoluzione completa.
+0. **Obbligo Tassativo di Esecuzione Completa dei Test Prima di Commit e Push**: È **TASSATIVAMENTE VIETATO** eseguire `git commit` o `git push` senza aver prima eseguito nella sessione corrente l'intera suite di test in ambiente isolato identico alla CI (`uv run --isolated --no-project --with-requirements requirements_test.txt pytest -q --tb=short --maxfail=2`, senza flag `--with <pkg>` ad-hoc) e i controlli di linting (`uv run --with ruff ruff check --select F,E4,E7,E9 custom_components/ tests/`) verificando che terminino con **100% PASS (exit code 0)**. Se anche un solo test fallisce, il commit e il push sono bloccati fino alla risoluzione completa.
 1. Incrementare la versione SemVer (`patch` per fix/asset/refactoring, `minor` per nuove feature/entità) in modo sincronizzato in:
    - `custom_components/ave_video44/manifest.json` (`"version": "X.Y.Z"`)
    - `pyproject.toml` (`version = "X.Y.Z"`)
@@ -59,8 +59,8 @@ Ad ogni `git commit` e `git push` su `main`, l'agente DEVE:
 
 ## 🧪 [ALL AGENTS] Mandatory Quality Gates
 Automated verification standards for all changes:
-- **Hard Pre-Commit & Pre-Push Test Gate**: È **TASSATIVAMENTE VIETATO** eseguire `git commit` o `git push` senza prima aver verificato il 100% PASS su test runner e linting (`exit code 0`).
-- **Host Test Runner**: Python tests are run via `uv run --with pytest pytest -q --tb=short --maxfail=2` (or `.venv/bin/pytest`).
+- **Hard Pre-Commit & Pre-Push Test Gate**: È **TASSATIVAMENTE VIETATO** eseguire `git commit` o `git push` senza prima aver verificato il 100% PASS su test runner in ambiente isolato (`requirements_test.txt`) e linting (`exit code 0`).
+- **Host Test Runner (CI Parity)**: Python tests MUST be run via `uv run --isolated --no-project --with-requirements requirements_test.txt pytest -q --tb=short --maxfail=2` so local runs match `.github/workflows/validate.yml` 1:1.
 - **Code Style & Linting**: Run `uv run ruff check custom_components/ tests/` and `uv run ruff format --check custom_components/ tests/`.
 - **🚫 Sub-Agents Test Ban**: Sub-Agents are strictly forbidden from executing global test suites. Only the Master Agent executes test runners.
 - **🚫 No Task Polling**: Do NOT run polling loops or timer schedules (`schedule`) while waiting for tests or commands.

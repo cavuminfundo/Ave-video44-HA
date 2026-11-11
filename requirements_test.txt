@@ -4,3 +4,4 @@ aiohttp>=3.9.0
 paho-mqtt>=2.0.0
 pyyaml>=6.0.1
 cryptography>=42.0.0
+voluptuous>=0.13.1
