@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.10";
+const CARD_VERSION = "1.3.11";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -155,6 +155,25 @@ class AveVideo44Card extends HTMLElement {
         }
       }
     }
+
+    if (!this._config.device_id) {
+      const candidateEntities = [
+        this._config.entity,
+        this._config.camera_entity,
+        this._config.call_state_sensor,
+        this._config.doorbell_binary_sensor,
+        this._config.lock_pedestrian,
+        this._config.wake_camera_button,
+        this._config.intercom_select
+      ];
+      for (let i = 0; i < candidateEntities.length; i++) {
+        const entId = candidateEntities[i];
+        if (entId && states[entId] && states[entId].attributes && states[entId].attributes.device_id) {
+          this._config.device_id = String(states[entId].attributes.device_id);
+          break;
+        }
+      }
+    }
   }
 
   connectedCallback() {
@@ -233,6 +252,10 @@ class AveVideo44Card extends HTMLElement {
       }
     } else if (callSensorState === "monitoring") {
       if (this._callState !== "monitoring") {
+        if (!this._inCall) {
+          this._ensureAudioContext();
+          this._subscribeAudioRx();
+        }
         this._setCallState("monitoring");
       }
     } else if (this._callState !== "idle" && (callSensorState === "idle" || (!callSensorState && doorbellState === "off" && this._callState !== "monitoring"))) {
@@ -859,10 +882,10 @@ class AveVideo44Card extends HTMLElement {
       }
       const btnHangup = shadow.getElementById("btnHangup");
       if (btnHangup) {
-        if (this._callState === "monitoring") {
-          btnHangup.classList.add("hidden");
-        } else {
+        if (this._callState === "talking" || this._callState === "ringing" || this._callState === "monitoring") {
           btnHangup.classList.remove("hidden");
+        } else {
+          btnHangup.classList.add("hidden");
         }
       }
       const closeLabel = this._callState === "monitoring" ? "Chiudi" : (this._callState === "talking" ? "Termina" : "Rifiuta");
@@ -1094,19 +1117,29 @@ class AveVideo44Card extends HTMLElement {
     const target = selectEl ? selectEl.value : "";
     if (!target || !this._hass) return;
 
-    const cleanCode = target.split("(")[0].trim();
-    if (cleanCode === "1" || target.toLowerCase().indexOf("citofono") !== -1) {
-      this._monitor();
-      return;
-    }
-
     this._setCallState("talking");
     try {
-      await this._hass.callService("ave_video44", "call_intercom", {
-        device_id: this._config.device_id,
-        room_code: target
-      });
+      if (this._config.device_id) {
+        await this._hass.callService("ave_video44", "call_intercom", {
+          device_id: this._config.device_id,
+          room_code: target
+        });
+      } else {
+        await this._hass.connection.sendMessagePromise({
+          type: "ave_video44/call_control",
+          device_id: "",
+          action: "call",
+          room_code: target
+        });
+      }
       await this._subscribeAudioRx();
+      const cameraStreamImg = shadow ? shadow.getElementById("cameraStreamImg") : null;
+      if (cameraStreamImg && cameraStreamImg.src) {
+        const base = cameraStreamImg.src.split("&t=")[0];
+        if (base) {
+          cameraStreamImg.src = `${base}&t=${Date.now()}`;
+        }
+      }
     } catch (err) {
       this._cleanupCall();
       this._showError("Chiamata non riuscita: " + (err && err.message ? err.message : String(err)));
@@ -1278,12 +1311,13 @@ class AveVideo44Card extends HTMLElement {
 
     const now = this._audioCtx.currentTime;
     const leadTime = 0.040;
-    const maxDrift = 0.100;
+    const softDrift = 0.100;
+    const maxDrift = 0.500;
 
-    if (!this._nextScheduledPlayTime || this._nextScheduledPlayTime <= now) {
+    if (!this._nextScheduledPlayTime || this._nextScheduledPlayTime <= now || (this._nextScheduledPlayTime - now > maxDrift)) {
       this._nextScheduledPlayTime = now + leadTime;
-    } else if (this._nextScheduledPlayTime - now > maxDrift) {
-      return;
+    } else if (this._audioCtx.state === "suspended" && (this._nextScheduledPlayTime - now > softDrift)) {
+      this._nextScheduledPlayTime = now + leadTime;
     }
 
     const buffer = this._audioCtx.createBuffer(1, pcm16Array.length, 8000);

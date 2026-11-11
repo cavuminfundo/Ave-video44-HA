@@ -1176,4 +1176,144 @@ async def test_ws_audio_subscribe_closure_safety(mock_hass, mock_coordinator):
     mock_cloud.remove_rx_pcm16_callback.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_ws_audio_tx_and_subscribe_with_empty_device_id_routes_to_cloud_sip_session():
+    """Verify empty device_id in audio_subscribe and audio_tx routes to active CloudSipMediaSession."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry1"
+    entry.data = {"ip_address": "192.168.1.10"}
+    entry.options = {}
+    coord = AveVideo44Coordinator(hass, entry)
+    coord.devices = [{"deviceId": 34964, "deviceName": "Unità interna"}]
+    coord.active_device_id = "34964"
+
+    cloud_sess = CloudSipMediaSession(
+        device_id="34964",
+        sip_username="u1",
+        sip_password="p1",
+        target_sip_uri="sip:target@eu.open-sips.gvs-icloud.com",
+        enable_audio=True,
+    )
+    cloud_sess.is_active = True
+    tx_frames = []
+    cloud_sess.send_pcm16_frame = lambda frame: tx_frames.append(frame)
+    coord.cloud_sip_sessions["34964"] = cloud_sess
+
+    hass.data = {DOMAIN: {"entries": {"entry1": coord}}}
+    conn = MagicMock()
+    conn.subscriptions = {}
+    conn.send_result = MagicMock()
+    conn.send_event = MagicMock()
+
+    await ws_api.ws_audio_subscribe(
+        hass,
+        conn,
+        {"id": 10, "type": "ave_video44/audio_subscribe", "device_id": ""},
+    )
+    assert len(cloud_sess._rx_pcm16_callbacks) == 1
+
+    # Simulate decoded PCM16 from intercom
+    for cb in list(cloud_sess._rx_pcm16_callbacks):
+        cb(b"\x01\x02" * 160)
+    conn.send_event.assert_called_once()
+
+    # Mic audio transmission with empty device_id=""
+    payload_b64 = base64.b64encode(b"\x03\x04" * 160).decode("ascii")
+    await ws_api.ws_audio_tx(
+        hass,
+        conn,
+        {
+            "id": 11,
+            "type": "ave_video44/audio_tx",
+            "device_id": "",
+            "payload": payload_b64,
+            "ack": True,
+        },
+    )
+    assert len(tx_frames) == 1
+    assert tx_frames[0] == b"\x03\x04" * 160
+
+    # Session renewal preserves callback and in_call state
+    coord.call_state = "in_call"
+    renewed_sess = CloudSipMediaSession(
+        device_id="34964",
+        sip_username="u1",
+        sip_password="p1",
+        target_sip_uri="sip:target@eu.open-sips.gvs-icloud.com",
+        enable_audio=True,
+    )
+    renewed_sess.is_active = True
+    await coord.async_commit_session("", renewed_sess)
+    assert coord.call_state == "in_call"
+    assert len(renewed_sess._rx_pcm16_callbacks) == 1
+
+    # Unsubscribe cleans up callback from renewed session and coordinator
+    conn.subscriptions[10]()
+    assert len(renewed_sess._rx_pcm16_callbacks) == 0
+
+
+@pytest.mark.asyncio
+async def test_coordinator_audio_subscribe_before_wake_camera_and_hangup_empty_device_id():
+    """Verify audio callbacks attach to existing/new sessions and hangup with empty device_id works."""
+    from custom_components.ave_video44.core.sip_session import CloudSipMediaSession
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry1"
+    entry.data = {"ip_address": "192.168.1.10"}
+    entry.options = {}
+    coord = AveVideo44Coordinator(hass, entry)
+    coord.devices = [
+        {
+            "deviceId": 34964,
+            "deviceName": "Unità interna",
+            "deviceIntercomInfo": [{"username": "sip:citofono@domain"}],
+        }
+    ]
+    coord.active_device_id = "34964"
+
+    # Pre-register callback before wake_camera
+    rx_frames = []
+    def dummy_rx(data: bytes):
+        rx_frames.append(data)
+
+    coord.add_audio_rx_callback(dummy_rx, "")
+
+    cloud_sess = CloudSipMediaSession(
+        device_id="34964",
+        sip_username="u1",
+        sip_password="p1",
+        target_sip_uri="sip:citofono@domain",
+        enable_audio=True,
+    )
+    cloud_sess.is_active = True
+    cloud_sess._last_rtp_ts = 1000.0
+    coord.cloud_sip_sessions["34964"] = cloud_sess
+
+    # Reusing existing session in wake_camera attaches callback and preserves in_call if active
+    coord.api.control_monitoring = AsyncMock()
+    coord.call_state = "in_call"
+    with patch("time.monotonic", return_value=1001.0):
+        uri = await coord.async_wake_camera("")
+        assert uri == "sip:citofono@domain"
+        assert dummy_rx in cloud_sess._rx_pcm16_callbacks
+        assert coord.call_state == "in_call"
+
+        # Call intercom with "1 (Citofono)" preserves in_call
+        await coord.async_call_intercom("", "1 (Citofono)")
+        assert coord.call_state == "in_call"
+        assert coord.active_caller_id == "1 (Citofono)"
+
+    # Hangup with empty device_id resets state and closes session
+    cloud_sess.async_stop = AsyncMock()
+    await coord.async_hangup_call("")
+    assert coord.call_state == "idle"
+    assert "34964" not in coord.cloud_sip_sessions
+    cloud_sess.async_stop.assert_called_once()
+
+
+
 

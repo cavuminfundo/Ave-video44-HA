@@ -60,6 +60,7 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         self.sip_session = AveSipSession()
         self.cloud_sip_sessions: Dict[str, CloudSipMediaSession] = {}
+        self._audio_rx_callbacks: Set[Callable[[bytes], None]] = set()
         self._wake_events: Dict[str, asyncio.Event] = {}
         self._wake_lock = asyncio.Lock()
         self.mqtt_listener: Optional[AveMqttListener] = None
@@ -105,6 +106,47 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
     def resolve_caller_name(self, caller_id: str) -> str:
         """Resolve room code against intercom book or fallback to original id."""
         return self.intercom_book.get(caller_id, caller_id)
+
+    def resolve_target_device_id(self, device_id: Optional[int | str] = None) -> str:
+        """Resolve target device ID from explicit value, active device, active session, or first device."""
+        dev_str = str(device_id).strip() if device_id is not None else ""
+        if dev_str:
+            return dev_str
+        if self.active_device_id:
+            return str(self.active_device_id).strip()
+        for k, sess in self.cloud_sip_sessions.items():
+            if sess and getattr(sess, "is_active", False):
+                return str(k)
+        if self.cloud_sip_sessions:
+            return str(next(iter(self.cloud_sip_sessions.keys())))
+        if isinstance(self.devices, dict) and self.devices:
+            return str(next(iter(self.devices.keys())))
+        if isinstance(self.devices, list) and self.devices:
+            first = self.devices[0]
+            if isinstance(first, dict) and first.get("deviceId") is not None:
+                return str(first.get("deviceId"))
+        return ""
+
+    def add_audio_rx_callback(
+        self, callback: Callable[[bytes], None], device_id: Optional[int | str] = None
+    ) -> None:
+        """Register an audio RX callback across current and future SIP sessions."""
+        self._audio_rx_callbacks.add(callback)
+        dev_str = self.resolve_target_device_id(device_id)
+        target = self.cloud_sip_sessions.get(dev_str) if dev_str else None
+        if target and hasattr(target, "add_rx_pcm16_callback"):
+            target.add_rx_pcm16_callback(callback)
+        elif self.sip_session and hasattr(self.sip_session, "add_rx_pcm16_callback"):
+            self.sip_session.add_rx_pcm16_callback(callback)
+
+    def remove_audio_rx_callback(self, callback: Callable[[bytes], None]) -> None:
+        """Unregister an audio RX callback from coordinator and all SIP sessions."""
+        self._audio_rx_callbacks.discard(callback)
+        for sess in list(self.cloud_sip_sessions.values()):
+            if sess and hasattr(sess, "remove_rx_pcm16_callback"):
+                sess.remove_rx_pcm16_callback(callback)
+        if self.sip_session and hasattr(self.sip_session, "remove_rx_pcm16_callback"):
+            self.sip_session.remove_rx_pcm16_callback(callback)
 
     def handle_incoming_call(
         self, caller_id: str, call_type: str, device_id: int | str
@@ -155,43 +197,39 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self, device_id: int | str, room_code: Optional[str] = None
     ) -> None:
         """Initiate outbound intercom call."""
-        target = room_code or self.selected_intercom_targets.get(str(device_id), "")
-        _LOGGER.debug("Calling intercom target %s from device %s", target, device_id)
+        dev_str = self.resolve_target_device_id(device_id)
+        target = room_code or self.selected_intercom_targets.get(str(dev_str), "")
+        _LOGGER.debug("Calling intercom target %s from device %s", target, dev_str)
         target_str = str(target).strip()
         if target_str == "1" or target_str.startswith("1 ") or "citofono" in target_str.lower():
-            await self.async_wake_camera(device_id, monitoring_device_number="1")
-            self.call_state = "monitoring"
-            self.active_device_id = str(device_id)
+            self.call_state = "in_call"
+            self.active_device_id = dev_str
             self.active_caller_id = target
             self.active_caller_name = self.resolve_caller_name(target)
+            await self.async_wake_camera(dev_str, monitoring_device_number="1")
             self.async_update_listeners()
             return
 
         self.call_state = "in_call"
-        self.active_device_id = str(device_id)
+        self.active_device_id = dev_str
         self.active_caller_id = target
         self.active_caller_name = self.resolve_caller_name(target)
         self.async_update_listeners()
 
     async def async_answer_call(self, device_id: Optional[int | str] = None) -> None:
         """Accept active incoming call."""
-        first_dev = ""
-        if isinstance(self.devices, dict) and self.devices:
-            first_dev = str(next(iter(self.devices.keys())))
-        elif isinstance(self.devices, list) and self.devices:
-            first_dev = str(self.devices[0].get("deviceId", ""))
-
-        target_dev = str(device_id or self.active_device_id or first_dev or "")
+        target_dev = self.resolve_target_device_id(device_id)
         _LOGGER.debug("Answering call on device %s (resolved %s)", device_id, target_dev)
-
-        if target_dev and not self.cloud_sip_sessions.get(target_dev):
-            await self.async_wake_camera(target_dev)
 
         self.call_state = "in_call"
         if target_dev:
             self.active_device_id = target_dev
         elif device_id is not None:
             self.active_device_id = str(device_id)
+
+        if target_dev and not self.cloud_sip_sessions.get(target_dev):
+            await self.async_wake_camera(target_dev)
+
         self.async_update_listeners()
 
     async def async_wait_for_wake(self, device_id: int | str, timeout: float = 10.0) -> None:
@@ -207,9 +245,12 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self, device_id: int | str, monitoring_device_number: Optional[str] = None
     ) -> Optional[str]:
         """Wake outdoor camera / start live monitoring session."""
-        _LOGGER.debug("Waking camera for device %s", device_id)
-        dev_str = str(device_id)
+        dev_str = self.resolve_target_device_id(device_id)
+        _LOGGER.debug("Waking camera for device %s (resolved %s)", device_id, dev_str)
         self.user_hangup.discard(dev_str)
+        raw_dev_str = str(device_id) if device_id is not None else ""
+        if raw_dev_str:
+            self.user_hangup.discard(raw_dev_str)
         wake_ev = asyncio.Event()
         self._wake_events[dev_str] = wake_ev
 
@@ -249,10 +290,14 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                             existing.is_active and last_rtp_val > 0 and (now - last_rtp_val) >= 8.0
                         )
                         if existing.is_active and not is_stale:
+                            for cb in list(self._audio_rx_callbacks):
+                                if hasattr(existing, "add_rx_pcm16_callback"):
+                                    existing.add_rx_pcm16_callback(cb)
                             self.notify_frame_read(dev_str)
                             self.active_rtsp_url = None
                             self.active_device_id = dev_str
-                            self.call_state = "monitoring"
+                            if self.call_state != "in_call":
+                                self.call_state = "monitoring"
                             self.async_update_listeners()
                             return target_sip_uri
 
@@ -299,6 +344,9 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
                                 ffmpeg_binary=ffmpeg_bin,
                                 enable_audio=enable_audio,
                             )
+                            for cb in list(self._audio_rx_callbacks):
+                                if hasattr(session, "add_rx_pcm16_callback"):
+                                    session.add_rx_pcm16_callback(cb)
                             self.cloud_sip_sessions[dev_str] = session
                             started_sip = await session.async_start()
                             if not started_sip:
@@ -318,14 +366,15 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             if started_sip:
                 self.active_rtsp_url = None
                 self.active_device_id = dev_str
-                self.call_state = "monitoring"
+                if self.call_state != "in_call":
+                    self.call_state = "monitoring"
                 self.async_update_listeners()
                 return target_sip_uri
 
             if self.api:
                 try:
                     await self.api.control_monitoring(
-                        device_id,
+                        dev_str,
                         monitoring_device_number=mon_num,
                         action=1,
                         resolution_level=1,
@@ -381,11 +430,12 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
             self._last_rtsp_auth = (scheme, user_enc, pwd_enc, domain, port)
 
             auth_part = f"{user_enc}:{pwd_enc}@" if user_enc and pwd_enc else ""
-            self.active_rtsp_url = f"{scheme}://{auth_part}{domain}:{port}/stream/1/{device_id}/0/{target_enc}"
-            _LOGGER.debug("Active RTSP URL constructed for device %s (credentials redacted)", device_id)
+            self.active_rtsp_url = f"{scheme}://{auth_part}{domain}:{port}/stream/1/{dev_str}/0/{target_enc}"
+            _LOGGER.debug("Active RTSP URL constructed for device %s (credentials redacted)", dev_str)
 
             self.active_device_id = dev_str
-            self.call_state = "monitoring"
+            if self.call_state != "in_call":
+                self.call_state = "monitoring"
             self.async_update_listeners()
             return self.active_rtsp_url
         finally:
@@ -393,11 +443,12 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     def notify_frame_read(self, device_id: int | str) -> None:
         """Record timestamp of camera frame read to prevent idle hangup."""
-        self._last_frame_request_ts[str(device_id)] = time.monotonic()
+        dev_str = self.resolve_target_device_id(device_id)
+        self._last_frame_request_ts[dev_str] = time.monotonic()
 
     def get_active_sip_session(self, device_id: int | str) -> Optional[CloudSipMediaSession]:
         """Return active Cloud SIP session for device, terminating if stale (>10s without RTP)."""
-        dev_str = str(device_id)
+        dev_str = self.resolve_target_device_id(device_id)
         sess = self.cloud_sip_sessions.get(dev_str)
         if not sess or not sess.is_active:
             return None
@@ -570,32 +621,39 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self, device_id: int | str, new_session: CloudSipMediaSession
     ) -> Optional[CloudSipMediaSession]:
         """Commit new pre-renewed session, replacing active session and stopping old one."""
-        dev_str = str(device_id)
-        if dev_str in self.user_hangup:
+        dev_str = self.resolve_target_device_id(device_id)
+        raw_dev_str = str(device_id) if device_id is not None else ""
+        if (dev_str and dev_str in self.user_hangup) or (raw_dev_str and raw_dev_str in self.user_hangup):
             try:
                 await new_session.async_stop()
             except Exception:
                 pass
             return None
 
-        old_sess = self.cloud_sip_sessions.get(dev_str)
+        old_sess = self.cloud_sip_sessions.get(dev_str) if dev_str else None
         if old_sess and hasattr(old_sess, "_rx_pcm16_callbacks") and hasattr(new_session, "add_rx_pcm16_callback"):
             for cb in list(old_sess._rx_pcm16_callbacks):
                 new_session.add_rx_pcm16_callback(cb)
-        self.cloud_sip_sessions[dev_str] = new_session
-        self.notify_frame_read(dev_str)
+        for cb in list(self._audio_rx_callbacks):
+            if hasattr(new_session, "add_rx_pcm16_callback"):
+                new_session.add_rx_pcm16_callback(cb)
 
-        old_task = self._watchdog_tasks.pop(dev_str, None)
+        target_dev = dev_str or raw_dev_str or str(getattr(new_session, "device_id", "") or "")
+        self.cloud_sip_sessions[target_dev] = new_session
+        self.notify_frame_read(target_dev)
+
+        old_task = self._watchdog_tasks.pop(target_dev, None)
         if old_task and not old_task.done():
             old_task.cancel()
 
-        self._watchdog_tasks[dev_str] = asyncio.create_task(
-            self._session_watchdog(dev_str, new_session)
+        self._watchdog_tasks[target_dev] = asyncio.create_task(
+            self._session_watchdog(target_dev, new_session)
         )
 
         self.active_rtsp_url = None
-        self.active_device_id = dev_str
-        self.call_state = "monitoring"
+        self.active_device_id = target_dev
+        if self.call_state != "in_call":
+            self.call_state = "monitoring"
         self.async_update_listeners()
 
         if old_sess and old_sess is not new_session:
@@ -608,29 +666,49 @@ class AveVideo44Coordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     async def async_hangup_call(self, device_id: int | str) -> None:
         """Terminate active call or monitoring session."""
-        _LOGGER.debug("Hanging up call/monitoring on device %s", device_id)
-        dev_str = str(device_id)
-        self.user_hangup.add(dev_str)
-        watchdog = self._watchdog_tasks.pop(dev_str, None)
+        dev_str = self.resolve_target_device_id(device_id)
+        raw_dev_str = str(device_id) if device_id is not None else ""
+        _LOGGER.debug("Hanging up call/monitoring on device %s (resolved %s)", device_id, dev_str)
+        if dev_str:
+            self.user_hangup.add(dev_str)
+        if raw_dev_str:
+            self.user_hangup.add(raw_dev_str)
+
+        watchdog = self._watchdog_tasks.pop(dev_str, None) if dev_str else None
+        if not watchdog and raw_dev_str:
+            watchdog = self._watchdog_tasks.pop(raw_dev_str, None)
         if watchdog and not watchdog.done():
             watchdog.cancel()
-        self._last_frame_request_ts.pop(dev_str, None)
 
-        if dev_str in self.cloud_sip_sessions:
+        if dev_str:
+            self._last_frame_request_ts.pop(dev_str, None)
+        if raw_dev_str:
+            self._last_frame_request_ts.pop(raw_dev_str, None)
+
+        sess = None
+        if dev_str and dev_str in self.cloud_sip_sessions:
             sess = self.cloud_sip_sessions.pop(dev_str)
+        elif raw_dev_str and raw_dev_str in self.cloud_sip_sessions:
+            sess = self.cloud_sip_sessions.pop(raw_dev_str)
+        elif self.cloud_sip_sessions:
+            sess_key = next(iter(self.cloud_sip_sessions.keys()))
+            sess = self.cloud_sip_sessions.pop(sess_key)
+
+        if sess:
             try:
                 await sess.async_stop()
             except Exception as err:
                 _LOGGER.debug("Error stopping CloudSipMediaSession on hangup: %s", err)
 
+        target_dev_for_api = dev_str or raw_dev_str
         if self.api and (self.call_state == "monitoring" or self.active_rtsp_url):
-            dev = next((d for d in self.devices if str(d.get("deviceId")) == str(device_id)), None)
+            dev = next((d for d in self.devices if str(d.get("deviceId")) == target_dev_for_api), None)
             mon_num = "1"
             if dev and isinstance(dev.get("extraConfig"), dict):
                 mon_num = str(dev["extraConfig"].get("deviceNumber", "1"))
             try:
                 await self.api.control_monitoring(
-                    device_id,
+                    target_dev_for_api or device_id,
                     monitoring_device_number=mon_num,
                     action=3,
                 )

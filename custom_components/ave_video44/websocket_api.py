@@ -57,11 +57,22 @@ def _get_coordinator(
 
 def get_active_sip_session(coordinator: AveVideo44Coordinator, device_id: Any) -> Any:
     """Resolve active SIP session: CloudSipMediaSession for device, or fallback to LAN AveSipSession."""
-    dev_str = str(device_id) if device_id is not None else ""
-    if dev_str and hasattr(coordinator, "cloud_sip_sessions"):
-        cloud_sess = coordinator.cloud_sip_sessions.get(dev_str)
-        if cloud_sess and getattr(cloud_sess, "is_active", False):
-            return cloud_sess
+    dev_str = str(device_id).strip() if device_id is not None else ""
+    if not dev_str and hasattr(coordinator, "resolve_target_device_id"):
+        rel_id = coordinator.resolve_target_device_id(device_id)
+        if isinstance(rel_id, str):
+            dev_str = rel_id
+    if not dev_str:
+        dev_str = str(getattr(coordinator, "active_device_id", "") or "").strip()
+
+    if hasattr(coordinator, "cloud_sip_sessions") and isinstance(coordinator.cloud_sip_sessions, dict):
+        if dev_str:
+            cloud_sess = coordinator.cloud_sip_sessions.get(dev_str)
+            if cloud_sess and getattr(cloud_sess, "is_active", False):
+                return cloud_sess
+        for sess in coordinator.cloud_sip_sessions.values():
+            if sess and getattr(sess, "is_active", False):
+                return sess
 
     if coordinator.sip_session and not getattr(coordinator.sip_session, "is_closed", True):
         return coordinator.sip_session
@@ -284,6 +295,9 @@ async def ws_audio_subscribe(
         if cloud_sess and (target_session is None or target_session is coordinator.sip_session):
             target_session = cloud_sess
 
+    if isinstance(getattr(coordinator, "_audio_rx_callbacks", None), set):
+        coordinator._audio_rx_callbacks.add(_audio_rx_callback)
+
     if target_session and hasattr(target_session, "add_rx_pcm16_callback"):
         target_session.add_rx_pcm16_callback(_audio_rx_callback)
     elif target_session and hasattr(target_session, "set_rx_pcm16_callback"):
@@ -291,10 +305,16 @@ async def ws_audio_subscribe(
 
     @callback
     def _unsubscribe() -> None:
+        if isinstance(getattr(coordinator, "_audio_rx_callbacks", None), set):
+            coordinator._audio_rx_callbacks.discard(_audio_rx_callback)
         if target_session and hasattr(target_session, "remove_rx_pcm16_callback"):
             target_session.remove_rx_pcm16_callback(_audio_rx_callback)
         elif target_session and hasattr(target_session, "set_rx_pcm16_callback"):
             target_session.set_rx_pcm16_callback(None)
+        if hasattr(coordinator, "cloud_sip_sessions") and isinstance(coordinator.cloud_sip_sessions, dict):
+            for s in list(coordinator.cloud_sip_sessions.values()):
+                if s and s is not target_session and hasattr(s, "remove_rx_pcm16_callback"):
+                    s.remove_rx_pcm16_callback(_audio_rx_callback)
 
     connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"], {"subscribed": True})

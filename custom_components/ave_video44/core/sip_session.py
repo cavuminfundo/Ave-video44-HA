@@ -1414,7 +1414,7 @@ class CloudSipMediaSession:
                 except Exception:
                     pass
 
-            if self.enable_audio and self._audio_sock and remote_audio_port and (now - self._last_audio_tx_ts) >= 1.0:
+            if self.enable_audio and self._audio_sock and remote_audio_port and (now - self._last_audio_tx_ts) >= 0.5:
                 self.send_pcm16_frame(b"\x00" * 320)
 
             session_age = now - self._session_start_ts if self._session_start_ts > 0 else 0.0
@@ -1604,7 +1604,7 @@ class CloudSipMediaSession:
                     self._writer.write(reg_pkt.encode("utf-8"))
                     await self._writer.drain()
 
-                    start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=2.5)
+                    start_line, headers, body = await asyncio.wait_for(self._read_sip_msg(), timeout=5.0)
                     status_code = int(start_line.split()[1]) if len(start_line.split()) > 1 else 0
                     _LOGGER.debug("%s", self._format_sip_rx_debug("SIP REGISTER", start_line, headers))
                     break

@@ -472,5 +472,17 @@ def test_srtp_rfc3711_key_derivation_vectors():
     assert srtp_pkt_inferred == srtp_pkt
 
 
+def test_cloud_sip_media_session_keepalive_cadence_and_register_timeout_constants():
+    """Verify NAT keepalive uses 0.5s interval and initial REGISTER uses 5.0s timeout."""
+    import inspect
+
+    relay_src = inspect.getsource(CloudSipMediaSession._udp_relay_loop)
+    assert ">= 0.5" in relay_src
+
+    start_src = inspect.getsource(CloudSipMediaSession.async_start)
+    assert "timeout=5.0" in start_src
+
+
+
 
 
