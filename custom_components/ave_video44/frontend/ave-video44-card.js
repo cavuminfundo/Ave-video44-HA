@@ -1,6 +1,6 @@
 // Design Read: Intercom Card UI for Home Assistant Lovelace & Companion App, technical utility dark theme, dial ENERGY 1 / RHYTHM 1 / MOTION 1
 
-const CARD_VERSION = "1.3.11";
+const CARD_VERSION = "1.3.12";
 
 class AveVideo44Card extends HTMLElement {
   constructor() {
@@ -1312,12 +1312,14 @@ class AveVideo44Card extends HTMLElement {
     const now = this._audioCtx.currentTime;
     const leadTime = 0.040;
     const softDrift = 0.100;
-    const maxDrift = 0.500;
+    const maxDrift = 0.250;
 
-    if (!this._nextScheduledPlayTime || this._nextScheduledPlayTime <= now || (this._nextScheduledPlayTime - now > maxDrift)) {
+    if (!this._nextScheduledPlayTime || this._nextScheduledPlayTime <= now) {
       this._nextScheduledPlayTime = now + leadTime;
     } else if (this._audioCtx.state === "suspended" && (this._nextScheduledPlayTime - now > softDrift)) {
       this._nextScheduledPlayTime = now + leadTime;
+    } else if (this._nextScheduledPlayTime - now > maxDrift) {
+      return;
     }
 
     const buffer = this._audioCtx.createBuffer(1, pcm16Array.length, 8000);

@@ -1123,6 +1123,7 @@ class CloudSipMediaSession:
         if not self._audio_sock:
             return False
         had_pkts = False
+        batch_frames: list[bytes] = []
         try:
             while True:
                 pkt, addr = self._audio_sock.recvfrom(65535)
@@ -1244,16 +1245,21 @@ class CloudSipMediaSession:
                         self._audio_rx_rms_samples.clear()
                         self._audio_rx_last_log_ts = now
 
-                    for cb in list(self._rx_pcm16_callbacks):
-                        try:
-                            cb(frame_320)
-                        except Exception as err:
-                            _LOGGER.debug("Audio RX callback error: %s", err)
+                    batch_frames.append(frame_320)
 
         except (BlockingIOError, InterruptedError):
             pass
         except Exception as err:
             _LOGGER.debug("Audio recvfrom error: %s", err)
+
+        if len(batch_frames) > 10:
+            batch_frames = batch_frames[-4:]
+        for frame_320 in batch_frames:
+            for cb in list(self._rx_pcm16_callbacks):
+                try:
+                    cb(frame_320)
+                except Exception as err:
+                    _LOGGER.debug("Audio RX callback error: %s", err)
         return had_pkts
 
     async def _start_ffmpeg_audio_subprocess(self, sdp_path: str) -> None:

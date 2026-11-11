@@ -299,7 +299,7 @@ async def test_cloud_sip_media_session_ffmpeg_audio_spawn_plain_rtp():
     session = CloudSipMediaSession(
         device_id="101",
         sip_username="sip:test@domain.com",
-        sip_password="dummy_password",
+        sip_password="p1",
         target_sip_uri="sip:target@domain.com",
         enable_audio=True,
     )
@@ -481,6 +481,50 @@ def test_cloud_sip_media_session_keepalive_cadence_and_register_timeout_constant
 
     start_src = inspect.getsource(CloudSipMediaSession.async_start)
     assert "timeout=5.0" in start_src
+
+
+def test_cloud_sip_media_session_drops_stale_burst_frames_after_event_loop_stall():
+    """Verify _process_inbound_audio_socket caps post-stall UDP bursts (>10 frames) to latest 4 frames while updating SRTP seq."""
+    import struct
+    from custom_components.ave_video44.core.sip_session import _encrypt_srtp_packet
+
+    session = CloudSipMediaSession(
+        device_id="101",
+        sip_username="sip:test@domain.com",
+        sip_password="p1",
+        target_sip_uri="sip:target@domain.com",
+        enable_audio=True,
+    )
+    session.is_active = True
+    session._audio_proto = "RTP/SAVP"
+    raw_key = b"K" * 30
+    session._srtp_rx_audio_key = raw_key
+    session._srtp_rx_tag_len = 10
+
+    # Simulate 25 SRTP packets (500ms burst) queued in kernel socket during an event loop stall
+    packets = []
+    for seq in range(1, 26):
+        hdr = struct.pack("!BBHII", 0x80, 0x08, seq, seq * 160, 0x11223344)
+        # Distinguish each packet's payload
+        payload = bytes([seq]) * 160
+        srtp_pkt = _encrypt_srtp_packet(hdr + payload, raw_key, ssrc=0x11223344, seq=seq, roc=0)
+        packets.append((srtp_pkt, ("51.144.180.20", 25000)))
+    packets.append(BlockingIOError())
+
+    mock_sock = MagicMock()
+    mock_sock.recvfrom.side_effect = packets
+    session._audio_sock = mock_sock
+
+    emitted_frames = []
+    session.add_rx_pcm16_callback(lambda frame: emitted_frames.append(frame))
+
+    had_pkts = session._process_inbound_audio_socket()
+    assert had_pkts is True
+    # SRTP high-water mark must reach the last packet (seq 25)
+    assert session._rx_last_seq == 25
+    # Only the latest 4 frames (80ms) must be emitted to callbacks instead of all 25
+    assert len(emitted_frames) == 4
+
 
 
 

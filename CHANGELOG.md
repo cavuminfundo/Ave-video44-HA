@@ -16,6 +16,14 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.12 — 2026-11-11
+
+### 🇬🇧 English
+- **Ultra-Low-Latency Audio RX & Post-Stall Burst Capping (`core/sip_session.py`, `frontend/ave-video44-card.js`)**: Eliminated the ~1.5s audio playback lag after Home Assistant event-loop stalls (e.g., `lidarr` blocking the MainThread for 2.4s and queueing ~120 UDP packets in the kernel socket buffer). `_process_inbound_audio_socket` now authenticates all queued SRTP packets to keep the RFC 3711 `(roc, seq)` high-water mark synchronized while capping any single post-stall drain burst (`> 10` frames) to the latest `4` frames (`80ms`). In `_playIncomingPcm16`, tightened `maxDrift` to `250ms` (`leadTime = 40ms`) and dropped excess frames beyond `250ms` while the `AudioContext` is running, preventing multi-second queues and overlapping `AudioBufferSourceNode` schedules.
+
+### 🇮🇹 Italiano
+- **Audio RX a Bassissima Latenza (<250ms) & Scarto Burst Post-Stall (`core/sip_session.py`, `frontend/ave-video44-card.js`)**: Eliminato il ritardo di ~1,5s sull'audio ricevuto dal citofono dopo gli stall dell'event loop di Home Assistant (es. `lidarr` che blocca il MainThread per 2,4s accumulando ~120 pacchetti UDP nel buffer del kernel). `_process_inbound_audio_socket` autentica ora tutti i pacchetti SRTP in coda per mantenere sincronizzato l'indice crittografico RFC 3711 `(roc, seq)`, ma limita i burst post-stall (`> 10` frame in un singolo ciclo) agli ultimi `4` frame (`80ms` live). In `_playIncomingPcm16`, ridotto `maxDrift` a `250ms` (`leadTime = 40ms`) con scarto dei frame in eccesso oltre i `250ms` quando `AudioContext` è in esecuzione, evitando code di riproduzione e sovrapposizioni di buffer audio.
+
 ## v1.3.11 — 2026-11-11
 
 ### 🇬🇧 English

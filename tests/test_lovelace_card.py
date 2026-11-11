@@ -38,9 +38,10 @@ def test_lovelace_card_monitoring_subscribes_audio_rx_and_shows_hangup():
     assert 'this._callState === "talking" || this._callState === "ringing" || this._callState === "monitoring"' in hangup_branch
 
 
-def test_lovelace_card_jitter_buffer_realigns_instead_of_dropping_frames():
+def test_lovelace_card_jitter_buffer_caps_drift_at_250ms_and_drops_excess_burst():
     src = CARD_JS_PATH.read_text(encoding="utf-8")
     play_block = src.split("_playIncomingPcm16(pcm16Array) {")[1].split("_cleanupCall()")[0]
-    assert "const maxDrift = 0.500;" in play_block
+    assert "const maxDrift = 0.250;" in play_block
     assert "this._nextScheduledPlayTime - now > maxDrift" in play_block
-    assert "else if (this._nextScheduledPlayTime - now > maxDrift) {\n      return;" not in play_block
+    assert "return;" in play_block
+

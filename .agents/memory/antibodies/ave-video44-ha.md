@@ -2,8 +2,8 @@
 
 ## [AB-AVE-001] WebAudio Autoplay Resume & Dynamic RX Jitter Buffer
 - **Target Files**: `custom_components/ave_video44/**/*.js`, `custom_components/ave_video44/**/*.py`, `www/**/*.js`
-- **Root Cause**: I browser mobile/WebView bloccano `AudioContext` in stato `suspended` se non ripreso dentro un gesto utente, e un buffer statico causa underrun o latenza crescente sull'audio citofonico PCM/G.711.
-- **Invariant**: Invocare sempre `await audioCtx.resume()` sul gesto di risposta/apertura chiamata e mantenere il ring-buffer RX con riallineamento dinamico del jitter.
+- **Root Cause**: I browser mobile/WebView bloccano `AudioContext` in stato `suspended` se non ripreso dentro un gesto utente, e gli stall dell'event loop di Home Assistant (es. `lidarr` che blocca il MainThread per 2.4s) accumulano ~120 pacchetti UDP nel socket del kernel causando un ritardo di 1.5s o sovrapposizioni audio se non limitati.
+- **Invariant**: Invocare sempre `await audioCtx.resume()` sul gesto di risposta/apertura chiamata, limitare i burst post-stall in `_process_inbound_audio_socket` (`> 10` frame in un ciclo -> ultimi `4` frame, aggiornando comunque `roc/seq` SRTP) e mantenere in `_playIncomingPcm16` `leadTime = 0.040` e `maxDrift = 0.250` con scarto dei frame oltre `maxDrift` quando `AudioContext` è `running`.
 - **onFailure Mandate**: Chiudere e rilasciare `MediaStreamTrack` e `AudioContext` nel blocco `finally` a fine chiamata.
 - **Forbidden Regex**: `new\s+AudioContext\(\)\s*;\s*//\s*no\s+resume`
 

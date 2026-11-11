@@ -135,7 +135,7 @@ def test_set_config_resilient_render_try_catch() -> None:
 def test_lovelace_rebuild_safe_registration() -> None:
     """Registration must use standard customElements define and single ll-rebuild dispatch without container event storm."""
     content = CARD_PATH.read_text(encoding="utf-8")
-    assert 'const CARD_VERSION = "1.3.11";' in content
+    assert 'const CARD_VERSION = "1.3.12";' in content
     assert 'customElements.define("ave-video44-card", AveVideo44Card)' in content
     assert 'window.dispatchEvent(new CustomEvent("ll-rebuild"))' in content
     assert '"HUI-VIEW"' not in content
