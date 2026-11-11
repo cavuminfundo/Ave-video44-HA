@@ -49,7 +49,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.3.9"
+_CARD_VERSION = "1.3.10"
 _BRAND_ICON_URL = "/ave_video44_brand/icon.png"
 _BRAND_LOGO_URL = "/ave_video44_brand/logo.png"
 _HACS_UPDATE_ENTITY_ID = "update.ave_video_v44_update"

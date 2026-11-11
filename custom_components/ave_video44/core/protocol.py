@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import struct
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ..const import (
     DEFAULT_APP_SECRET,

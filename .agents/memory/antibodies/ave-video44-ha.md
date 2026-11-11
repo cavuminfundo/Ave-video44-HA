@@ -16,10 +16,17 @@
 
 ## [AB-AVE-003] WebSocket RTSP Redaction, SIP TCP/UDP Bounds & Pre-Commit Test Gate
 - **Target Files**: `custom_components/ave_video44/websocket_api.py`, `custom_components/ave_video44/core/sip_session.py`, `custom_components/ave_video44/core/protocol.py`
-- **Root Cause**: Risposte WebSocket `action=monitor` con credenziali RTSP in chiaro, letture SIP TCP senza tetto su header/`Content-Length`, e socket UDP che accettano pacchetti da IP arbitrari sulla LAN espongono l'impianto domestico a leak di credenziali, OOM e hijacking audio/video.
-- **Invariant**: Mascherare sempre le credenziali in `rtsp_url` prima dell'invio via WebSocket, imporre `MAX_SIP_HEADER_BYTES`/`MAX_SIP_CONTENT_LENGTH` in `_read_sip_msg`, filtrare gli IP sorgente UDP con `_is_trusted_udp_source`, ed eseguire sempre l'intera suite `pytest` prima di ogni `git commit` / `git push`.
-- **onFailure Mandate**: Scartare i frame UDP da IP non autorizzati e svuotare `_rx_buf` sollevando `ValueError` su messaggi SIP fuori limite.
+- **Root Cause**: Risposte WebSocket `action=monitor` con credenziali RTSP in chiaro, letture SIP TCP senza tetto su header/`Content-Length`, e socket UDP RTP in chiaro (`RTP/AVP`) che accettano pacchetti da IP arbitrari sulla LAN espongono l'impianto domestico a leak di credenziali, OOM e hijacking audio.
+- **Invariant**: Mascherare sempre le credenziali in `rtsp_url` prima dell'invio via WebSocket, imporre `MAX_SIP_HEADER_BYTES`/`MAX_SIP_CONTENT_LENGTH` in `_read_sip_msg`, filtrare gli IP sorgente UDP con `_is_trusted_udp_source` solo su flussi `RTP/AVP` non cifrati (e `AveSipSession` LAN), ed eseguire sempre l'intera suite `pytest` prima di ogni `git commit` / `git push`.
+- **onFailure Mandate**: Scartare i frame UDP `RTP/AVP` da IP non autorizzati e svuotare `_rx_buf` sollevando `ValueError` su messaggi SIP fuori limite.
 - **Forbidden Regex**: `send_result\([^)]*"rtsp_url"\s*:\s*rtsp_url\s*\)`
+
+## [AB-AVE-005] Cloud SRTP (`RTP/SAVP`) Relay IP Asymmetry & Symmetric RTP (RFC 4961)
+- **Target Files**: `custom_components/ave_video44/core/sip_session.py`
+- **Root Cause**: In GVS Cloud (`eu.open-sips.gvs-icloud.com`), il `200 OK` SDP spesso riporta in `c=IN IP4` l'IP privato del monitor interno o un IP di signaling diverso dagli IP pubblici dei relay `rtpproxy` da cui arrivano i pacchetti UDP audio/video SRTP. Filtrare `_video_sock` o `RTP/SAVP` su `_audio_sock` tramite `addr[0] == self._remote_ip` scarta il 100% del video e impedisce il Symmetric RTP learning dell'audio.
+- **Invariant**: Per i flussi `RTP/SAVP` (SRTP), l'autenticazione del mittente DEVE avvenire crittograficamente tramite HMAC-SHA1 (`_decrypt_srtp_packet` con `hmac.compare_digest` per l'audio e demuxer SRTP FFmpeg per il video) PRIMA di aggiornare `(self._remote_ip, self._remote_audio_port)` via Symmetric RTP, senza pre-filtrare l'IP sorgente UDP rispetto al `c=IN IP4` dell'SDP iniziale. Inoltre, i retry `INVITE` dopo `603 Decline` devono gestire eventuali challenge `401/407` sul nuovo `CSeq`.
+- **onFailure Mandate**: Scartare qualsiasi pacchetto `RTP/SAVP` il cui tag HMAC-SHA1 fallisca la verifica prima di toccare `self._remote_ip` o `self._remote_audio_port`.
+- **Forbidden Regex**: `while\s+self\._video_sock:\s*\n\s*pkt,\s*addr\s*=\s*self\._video_sock\.recvfrom\(65535\)\s*\n\s*if\s+not\s+self\._is_trusted_udp_source`
 
 ## [AB-AVE-004] CI `requirements_test.txt` Parity & `conftest.py` Voluptuous Stub Drift
 - **Target Files**: `requirements_test.txt`, `pyproject.toml`, `tests/conftest.py`, `tests/test_repo_governance.py`

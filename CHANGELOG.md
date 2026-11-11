@@ -16,6 +16,16 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.10 — 2026-11-11
+
+### 🇬🇧 English
+- **Fix Cloud SRTP Video Streaming & Symmetric RTP Audio (`core/sip_session.py`)**: Resolved a regression in `v1.3.9` where `CloudSipMediaSession` filtered incoming SRTP (`RTP/SAVP`) audio and video packets against the initial SDP `c=IN IP4` address (which in GVS Cloud often carries the indoor monitor's private LAN IP or signaling IP rather than the OpenSIPS `rtpproxy` media relay IP). For `RTP/SAVP` streams, cryptographic HMAC-SHA1 verification (`_decrypt_srtp_packet` for audio and FFmpeg's SRTP demuxer for video) now authenticates packets before Symmetric RTP (`RFC 4961`) updates `(self._remote_ip, self._remote_audio_port)`, while `_is_trusted_udp_source` source-IP filtering remains enforced on unencrypted `RTP/AVP` streams and `AveSipSession` LAN calls.
+- **SIP `603 Decline` Reconnect Re-Authentication (`core/sip_session.py`)**: Handled `401 Unauthorized` / `407 Proxy Authentication Required` challenges during `INVITE` retry loops after `603 Decline` (monitor cooldown), preventing call setup aborts on rapid reconnects.
+
+### 🇮🇹 Italiano
+- **Ripristino Video SRTP Cloud & Audio Symmetric RTP (`core/sip_session.py`)**: Risolta una regressione introdotta nella `v1.3.9` in cui `CloudSipMediaSession` filtrava i pacchetti audio e video SRTP (`RTP/SAVP`) in ingresso confrontandoli con l'indirizzo `c=IN IP4` dell'SDP iniziale (che su GVS Cloud spesso riporta l'IP privato del monitor interno o un IP di signaling anziché l'IP pubblico del relay media `rtpproxy` di OpenSIPS). Per i flussi `RTP/SAVP`, l'autenticazione avviene ora crittograficamente tramite verifica HMAC-SHA1 (`_decrypt_srtp_packet` per l'audio e demuxer SRTP di FFmpeg per il video) prima che il Symmetric RTP (`RFC 4961`) aggiorni `(self._remote_ip, self._remote_audio_port)`, mantenendo il filtro `_is_trusted_udp_source` sui flussi `RTP/AVP` non cifrati e sulle chiamate LAN `AveSipSession`.
+- **Riautenticazione SIP su Retry dopo `603 Decline` (`core/sip_session.py`)**: Aggiunta la gestione dei challenge `401 Unauthorized` / `407 Proxy Authentication Required` durante il retry `INVITE` successivo a `603 Decline` (cooldown del monitor interno), evitando l'interruzione della chiamata nelle riconnessioni ravvicinate.
+
 ## v1.3.9 — 2026-11-11
 
 ### 🇬🇧 English

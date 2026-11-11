@@ -1129,9 +1129,6 @@ class CloudSipMediaSession:
                 if not pkt:
                     break
 
-                if not self._is_trusted_udp_source(addr):
-                    continue
-
                 # Backwards-compatibility relay for legacy FFmpeg audio listener tests
                 if self._ffmpeg_audio_port:
                     had_pkts = True
@@ -1169,6 +1166,8 @@ class CloudSipMediaSession:
                     if rtp_pkt is None:
                         continue
                 elif self._audio_proto == "RTP/AVP":
+                    if not self._is_trusted_udp_source(addr):
+                        continue
                     if _rtp_header_length(pkt) <= 0 or (pkt[1] & 0x7F) not in (0, 8):
                         continue
                     rtp_pkt = pkt
@@ -1186,7 +1185,6 @@ class CloudSipMediaSession:
                     and isinstance(addr, tuple)
                     and len(addr) >= 2
                     and addr[0] not in ("127.0.0.1", "0.0.0.0")
-                    and (not self._remote_ip or addr[0] == self._remote_ip)
                 ):
                     self._remote_ip, self._remote_audio_port = addr[0], addr[1]
 
@@ -1399,7 +1397,6 @@ class CloudSipMediaSession:
         last_src_frames = 0
         last_video_pkt_ts = 0.0
         max_pkt_gap_ms = 0.0
-        audio_rx_pkts = 0
         last_stats_log = time.monotonic()
         if remote_ip and not self._remote_ip:
             self._remote_ip = remote_ip
@@ -1435,9 +1432,7 @@ class CloudSipMediaSession:
             had_pkts = False
             try:
                 while self._video_sock:
-                    pkt, addr = self._video_sock.recvfrom(65535)
-                    if not self._is_trusted_udp_source(addr):
-                        continue
+                    pkt, _ = self._video_sock.recvfrom(65535)
                     if pkt:
                         had_pkts = True
                         video_rx_pkts += 1
@@ -1725,6 +1720,45 @@ class CloudSipMediaSession:
                     retried_603 = True
                     _LOGGER.warning("Received 603 Decline from monitor cooldown, retrying INVITE in 2.5s...")
                     await asyncio.sleep(2.5)
+                    cseq_inv += 1
+                    inv_auth_pkt = self.build_invite_packet(
+                        cseq=cseq_inv,
+                        local_ip=self._local_ip,
+                        audio_port=audio_port,
+                        video_port=video_port,
+                        srtp_audio_key=srtp_audio_key,
+                        srtp_video_key=srtp_video_key,
+                        auth_header=auth_val,
+                    )
+                    self._writer.write(inv_auth_pkt.encode("utf-8"))
+                    await self._writer.drain()
+                    last_invite_send_ts = time.monotonic()
+                    status_code = 0
+                    continue
+                elif status_code in (401, 407):
+                    ack_pkt = (
+                        f"ACK {self.target_sip_uri} SIP/2.0\r\n"
+                        f"Via: SIP/2.0/TCP {self._local_ip}:5060;branch=z9hG4bK-inv-{cseq_inv}\r\n"
+                        f"To: <{self.target_sip_uri}>\r\n"
+                        f"From: <sip:{self._sip_user}@{self._sip_domain}>;tag={self._from_tag}\r\n"
+                        f"Call-ID: {self._call_id}\r\n"
+                        f"CSeq: {cseq_inv} ACK\r\n"
+                        "Content-Length: 0\r\n\r\n"
+                    )
+                    self._writer.write(ack_pkt.encode("utf-8"))
+                    await self._writer.drain()
+                    auth_hdr_name = "proxy-authenticate" if status_code == 407 else "www-authenticate"
+                    challenge = headers.get(auth_hdr_name, "")
+                    ch_dict = self._parse_digest_challenge(challenge)
+                    auth_val = self._compute_digest_auth(
+                        username=self._sip_user,
+                        realm=ch_dict.get("realm", self._sip_domain),
+                        password=self.sip_password,
+                        method="INVITE",
+                        uri=self.target_sip_uri,
+                        nonce=ch_dict.get("nonce", ""),
+                        qop=ch_dict.get("qop"),
+                    )
                     cseq_inv += 1
                     inv_auth_pkt = self.build_invite_packet(
                         cseq=cseq_inv,

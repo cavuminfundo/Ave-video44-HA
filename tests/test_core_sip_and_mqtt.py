@@ -1,9 +1,8 @@
 """Tests for AVE Video V44 MQTT listener and SIP session."""
 
-import asyncio
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from custom_components.ave_video44.const import (
     DEV_DOORSTATION,

@@ -7,19 +7,20 @@ MANIFEST_JSON = REPO_ROOT / "custom_components" / "ave_video44" / "manifest.json
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 
 
-def test_semver_sync_1_3_9():
-    """Verify version 1.3.9 synchronization across backend files."""
+def test_semver_sync_1_3_10():
+    """Verify version 1.3.10 synchronization across backend files."""
     init_content = INIT_PY.read_text(encoding="utf-8")
     manifest_content = MANIFEST_JSON.read_text(encoding="utf-8")
     pyproject_content = PYPROJECT_TOML.read_text(encoding="utf-8")
 
-    assert '_CARD_VERSION = "1.3.9"' in init_content
+    assert '_CARD_VERSION = "1.3.10"' in init_content
     assert 'resource_url = f"{_CARD_URL}?v={_CARD_VERSION}"' in init_content
-    assert '"version": "1.3.9"' in manifest_content
-    assert 'version = "1.3.9"' in pyproject_content
+    assert '"version": "1.3.10"' in manifest_content
+    assert 'version = "1.3.10"' in pyproject_content
 
 
-test_semver_sync_1_3_8 = test_semver_sync_1_3_9
+test_semver_sync_1_3_9 = test_semver_sync_1_3_10
+test_semver_sync_1_3_8 = test_semver_sync_1_3_10
 
 
 def test_static_paths_cache_headers_disabled():

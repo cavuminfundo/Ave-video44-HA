@@ -267,7 +267,7 @@ _ensure_ha_stubs()
 
 # Voluptuous stub if not present
 try:
-    import voluptuous as vol
+    import voluptuous as vol  # noqa: F401
 except ImportError:
     vol_mod = ModuleType("voluptuous")
     class Schema:
@@ -279,7 +279,6 @@ except ImportError:
     vol_mod.In = lambda items: items
     vol_mod.Any = lambda *args: lambda val: val
     sys.modules["voluptuous"] = vol_mod
-    import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant

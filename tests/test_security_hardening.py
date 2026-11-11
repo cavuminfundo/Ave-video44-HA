@@ -294,3 +294,75 @@ def test_sdp_temp_path_sanitizes_device_id():
 
     sess = CloudSipMediaSession(sip_config={}, device_id="../../etc/passwd")
     assert sess.device_id == "etcpasswd"
+
+
+def test_srtp_symmetric_rtp_accepts_cloud_relay_ip_different_from_sdp():
+    """Verify RTP/SAVP (SRTP) accepts packets from OpenSIPS Cloud relay IP != SDP c=IN IP4 after HMAC verification."""
+    sess = CloudSipMediaSession(sip_config={}, device_id="9991")
+    sess._audio_proto = "RTP/SAVP"
+    # SDP c=IN IP4 often carries indoor monitor private IP or signaling IP while RTP arrives from rtpproxy relay
+    sess._remote_ip = "192.168.1.50"
+    sess._remote_audio_port = 12000
+    raw_key = b"K" * 30
+    sess._srtp_rx_audio_key = raw_key
+
+    rtp_pcma = b"\x80\x08\x00\x05\x00\x00\x00\xa0\x12\x34\x56\x78" + (b"\xd5" * 160)
+    valid_srtp = sess._encrypt_srtp_packet(rtp_pcma, raw_key, roc=0, tag_len=10)
+    assert valid_srtp is not None
+
+    # 1. Forged SRTP packet with invalid HMAC from arbitrary IP must be rejected and NOT update _remote_ip
+    forged_srtp = valid_srtp[:-1] + bytes([valid_srtp[-1] ^ 0xFF])
+    mock_sock = MagicMock()
+    mock_sock.recvfrom = MagicMock(
+        side_effect=[
+            (forged_srtp, ("203.0.113.99", 44444)),
+            BlockingIOError(),
+        ]
+    )
+    sess._audio_sock = mock_sock
+    sess._process_inbound_audio_socket()
+    assert sess._audio_rx_pkts == 0
+    assert sess._remote_ip == "192.168.1.50"
+    assert sess._remote_audio_port == 12000
+
+    # 2. Valid HMAC-authenticated SRTP packet from Cloud relay IP must be accepted and update Symmetric RTP target
+    mock_sock.recvfrom = MagicMock(
+        side_effect=[
+            (valid_srtp, ("47.254.152.181", 34560)),
+            BlockingIOError(),
+        ]
+    )
+    sess._process_inbound_audio_socket()
+    assert sess._audio_rx_pkts == 1
+    assert sess._remote_ip == "47.254.152.181"
+    assert sess._remote_audio_port == 34560
+
+
+@pytest.mark.asyncio
+async def test_video_udp_relay_loop_forwards_srtp_from_cloud_relay_ip():
+    """Verify _udp_relay_loop forwards incoming SRTP video packets to FFmpeg even when Cloud relay IP != SDP _remote_ip."""
+    sess = CloudSipMediaSession(sip_config={}, device_id="9991")
+    sess.is_active = True
+    sess._remote_ip = "192.168.1.50"
+    sess._ffmpeg_port = 55000
+    sess._process_inbound_audio_socket = MagicMock(return_value=False)
+
+    video_pkt = b"\x80\xe0\x00\x01\x00\x00\x00\x01\x11\x22\x33\x44" + b"\xaa" * 100
+    mock_video_sock = MagicMock()
+    calls = 0
+
+    def _recv_once(_bufsize):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return (video_pkt, ("47.254.152.181", 40000))
+        sess.is_active = False
+        raise BlockingIOError()
+
+    mock_video_sock.recvfrom = MagicMock(side_effect=_recv_once)
+    sess._video_sock = mock_video_sock
+
+    await sess._udp_relay_loop("192.168.1.50", 40000, 12000)
+    mock_video_sock.sendto.assert_any_call(video_pkt, ("127.0.0.1", 55000))
+
+
