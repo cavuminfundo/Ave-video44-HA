@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -48,7 +49,7 @@ PLATFORMS: list[Platform] = [
 
 _CARD_URL = "/ave_video44_card/ave-video44-card.js"
 _LEGACY_CARD_URL = "/ave_video44_frontend/ave-video44-card.js"
-_CARD_VERSION = "1.3.8"
+_CARD_VERSION = "1.3.9"
 _BRAND_ICON_URL = "/ave_video44_brand/icon.png"
 _BRAND_LOGO_URL = "/ave_video44_brand/logo.png"
 _HACS_UPDATE_ENTITY_ID = "update.ave_video_v44_update"
@@ -410,6 +411,30 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+SERVICE_UNLOCK_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): vol.Any(int, vol.All(str, vol.Length(min=1, max=64))),
+        vol.Optional("lock_id", default="1"): vol.All(vol.Coerce(str), vol.In(["1", "2"])),
+        vol.Optional("entry_id"): vol.All(str, vol.Length(min=1, max=64)),
+    }
+)
+
+SERVICE_CALL_INTERCOM_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): vol.Any(int, vol.All(str, vol.Length(min=1, max=64))),
+        vol.Optional("room_code"): vol.All(str, vol.Length(min=1, max=32)),
+        vol.Optional("entry_id"): vol.All(str, vol.Length(min=1, max=64)),
+    }
+)
+
+SERVICE_CALL_ACTION_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_id"): vol.Any(int, vol.All(str, vol.Length(min=1, max=64))),
+        vol.Optional("entry_id"): vol.All(str, vol.Length(min=1, max=64)),
+    }
+)
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register domain services."""
     if hass.services.has_service(DOMAIN, "unlock"):
@@ -454,10 +479,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await coord.async_hangup_call(device_id)
 
     services = {
-        "unlock": async_service_unlock,
-        "call_intercom": async_service_call_intercom,
-        "answer_call": async_service_answer_call,
-        "hangup_call": async_service_hangup_call,
+        "unlock": (async_service_unlock, SERVICE_UNLOCK_SCHEMA),
+        "call_intercom": (async_service_call_intercom, SERVICE_CALL_INTERCOM_SCHEMA),
+        "answer_call": (async_service_answer_call, SERVICE_CALL_ACTION_SCHEMA),
+        "hangup_call": (async_service_hangup_call, SERVICE_CALL_ACTION_SCHEMA),
     }
-    for name, handler in services.items():
-        hass.services.async_register(DOMAIN, name, handler)
+    for name, (handler, schema) in services.items():
+        hass.services.async_register(DOMAIN, name, handler, schema=schema)

@@ -16,6 +16,18 @@ dell'integrazione: aggiorna da **HACS → AVE Video V44 → Aggiorna**.
 
 ## [Non rilasciato]
 
+## v1.3.9 — 2026-11-11
+
+### 🇬🇧 English
+- **WebSocket API Hardening (`websocket_api.py`)**: Redacted embedded RTSP credentials (`rtsp://***:***@...`) in `ave_video44/call_control` (`action="monitor"`) responses, added a 32 KB Base64 / 24 KB PCM16 payload size cap, per-session 150 fps rate limiting, and deterministic LRU eviction at 32 sessions on `ave_video44/audio_tx`.
+- **SIP TCP & UDP Media Session Hardening (`core/sip_session.py`)**: Enforced anti-OOM limits (`MAX_SIP_HEADER_BYTES = 16384`, `MAX_SIP_CONTENT_LENGTH = 65536`) in `_read_sip_msg`, source IP filtering (`_is_trusted_udp_source`) on inbound UDP audio/video sockets and `AveSipSession.datagram_received` to prevent Symmetric RTP hijacking and video injection, plus path-traversal sanitization (`_sanitize_device_id`) on temporary SDP descriptors.
+- **Domain Service Schemas & Binary Protocol Bounds (`__init__.py`, `core/protocol.py`)**: Added strict Voluptuous validation schemas (`SERVICE_UNLOCK_SCHEMA`, `SERVICE_CALL_INTERCOM_SCHEMA`, `SERVICE_CALL_ACTION_SCHEMA`) to `hass.services.async_register` and enforced `payload_length >= 16` header boundary validation in `parse_gvs_udp_packet`.
+
+### 🇮🇹 Italiano
+- **Hardening WebSocket API (`websocket_api.py`)**: Mascherate le credenziali RTSP (`rtsp://***:***@...`) nelle risposte `ave_video44/call_control` (`action="monitor"`), introdotto limite di dimensione payload a 32 KB Base64 / 24 KB PCM16, rate limiting a 150 fps per sessione ed eviction LRU deterministica a 32 sessioni su `ave_video44/audio_tx`.
+- **Hardening Sessione SIP TCP & Media UDP (`core/sip_session.py`)**: Imposti limiti anti-OOM (`MAX_SIP_HEADER_BYTES = 16384`, `MAX_SIP_CONTENT_LENGTH = 65536`) in `_read_sip_msg`, filtro sugli IP sorgente UDP (`_is_trusted_udp_source`) sui socket audio/video e `AveSipSession.datagram_received` contro dirottamento Symmetric RTP e iniezione video, e sanitizzazione contro path traversal (`_sanitize_device_id`) sui descrittori SDP temporanei.
+- **Schemi Servizi HA & Bounds Protocollo Binario (`__init__.py`, `core/protocol.py`)**: Aggiunti schemi di validazione Voluptuous (`SERVICE_UNLOCK_SCHEMA`, `SERVICE_CALL_INTERCOM_SCHEMA`, `SERVICE_CALL_ACTION_SCHEMA`) a `hass.services.async_register` e validazione `payload_length >= 16` in `parse_gvs_udp_packet`.
+
 ## v1.3.8 — 2026-11-02
 
 ### 🇬🇧 English

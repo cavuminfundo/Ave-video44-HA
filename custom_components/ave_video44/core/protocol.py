@@ -70,6 +70,10 @@ def parse_gvs_udp_packet(packet: bytes) -> Dict[str, Any]:
         raise ValueError(f"Invalid magic header: {packet[:10]!r}")
 
     payload_length = struct.unpack_from(">H", packet, 10)[0]
+    if payload_length < 16:
+        raise ValueError(
+            f"Truncated GVS header payload: payload_length {payload_length} < 16"
+        )
     expected_min_len = 12 + payload_length
     if len(packet) < expected_min_len:
         raise ValueError(

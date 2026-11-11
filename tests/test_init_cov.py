@@ -29,7 +29,7 @@ async def test_async_register_card_caching_and_version():
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
 
-    assert _CARD_VERSION == "1.3.8"
+    assert _CARD_VERSION == "1.3.9"
 
     await _async_register_card(hass)
 
@@ -44,8 +44,8 @@ async def test_async_register_card_caching_and_version():
 
     fake_resources.async_create_item.assert_awaited_once()
     registered_item = fake_resources.async_create_item.call_args[0][0]
-    assert "?v=1.3.8" in registered_item["url"]
-    assert registered_item["url"] == "/ave_video44_card/ave-video44-card.js?v=1.3.8"
+    assert "?v=1.3.9" in registered_item["url"]
+    assert registered_item["url"] == "/ave_video44_card/ave-video44-card.js?v=1.3.9"
 
 
 @pytest.mark.asyncio

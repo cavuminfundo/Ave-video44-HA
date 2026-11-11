@@ -10,7 +10,7 @@ Before starting any work, consult the relevant documentation files below:
 - **System Architecture & Component Model:** Read [docs/architecture.md](file:///./docs/architecture.md).
 - **Project Roadmap & Evolution Phases:** Read [docs/roadmap.md](file:///./docs/roadmap.md).
 - **Low-Level Code Implementation & Security Bible:** Read [docs/code-implementation.md](file:///./docs/code-implementation.md).
-- **Lessons Learned & Discovered Hardware Invariants:** Read [.agents/memory/lessons.md](file:///./.agents/memory/lessons.md).
+- **Domain Crash Antibodies & Archaeology (`lessons.md` Retired):** Consult [`.agents/memory/antibodies/ave-video44-ha.md`](file:///home/federico/Ave-video44-HA/.agents/memory/antibodies/ave-video44-ha.md) and run `python3 /home/federico/skills_library/scripts/local_llm_offload.py --task archaeology --files <file>` before editing files `>600L`. Whenever you resolve a bug or regression, compile or update an `AB-AVE-NNN` Crash Antibody card in `.agents/memory/antibodies/ave-video44-ha.md`.
 
 ---
 
@@ -46,10 +46,12 @@ Code first. Then at most three short lines: what was skipped, when to add it. No
 
 ### 5. Mandatory Release, Versioning & Changelog Policy (Mandatory on Commit & Push)
 Ad ogni `git commit` e `git push` su `main`, l'agente DEVE:
+0. **Obbligo Tassativo di Esecuzione Completa dei Test Prima di Commit e Push**: È **TASSATIVAMENTE VIETATO** eseguire `git commit` o `git push` senza aver prima eseguito nella sessione corrente l'intera suite di test (`uv run --with pytest pytest -q --tb=short --maxfail=2`) e i controlli di linting (`uv run ruff check custom_components/ tests/` e `uv run ruff format --check custom_components/ tests/`) verificando che terminino con **100% PASS (exit code 0)**. Se anche un solo test fallisce, il commit e il push sono bloccati fino alla risoluzione completa.
 1. Incrementare la versione SemVer (`patch` per fix/asset/refactoring, `minor` per nuove feature/entità) in modo sincronizzato in:
    - `custom_components/ave_video44/manifest.json` (`"version": "X.Y.Z"`)
    - `pyproject.toml` (`version = "X.Y.Z"`)
    - `custom_components/ave_video44/frontend/ave-video44-card.js` (`const CARD_VERSION = "X.Y.Z";`)
+   - `custom_components/ave_video44/__init__.py` (`_CARD_VERSION = "X.Y.Z"`)
 2. Compilare le note di rilascio in `CHANGELOG.md` subito sotto `## [Non rilasciato]` aggiungendo l'intestazione `## vX.Y.Z — YYYY-MM-DD` (con sezioni `### 🇬🇧 English` e `### 🇮🇹 Italiano`).
 3. Creare e pushare il tag Git corrispondente (`git tag -f vX.Y.Z && git push -f origin vX.Y.Z`) oltre a `origin/main`. Il push del tag attiva automaticamente `.github/workflows/release.yml` che estrae la sezione corrispondente da `CHANGELOG.md` (tramite `header = f"## {tag} "`) e pubblica/aggiorna la GitHub Release con le relative note bilingue.
 
@@ -57,6 +59,7 @@ Ad ogni `git commit` e `git push` su `main`, l'agente DEVE:
 
 ## 🧪 [ALL AGENTS] Mandatory Quality Gates
 Automated verification standards for all changes:
+- **Hard Pre-Commit & Pre-Push Test Gate**: È **TASSATIVAMENTE VIETATO** eseguire `git commit` o `git push` senza prima aver verificato il 100% PASS su test runner e linting (`exit code 0`).
 - **Host Test Runner**: Python tests are run via `uv run --with pytest pytest -q --tb=short --maxfail=2` (or `.venv/bin/pytest`).
 - **Code Style & Linting**: Run `uv run ruff check custom_components/ tests/` and `uv run ruff format --check custom_components/ tests/`.
 - **🚫 Sub-Agents Test Ban**: Sub-Agents are strictly forbidden from executing global test suites. Only the Master Agent executes test runners.

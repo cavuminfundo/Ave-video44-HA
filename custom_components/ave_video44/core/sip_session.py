@@ -38,6 +38,15 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
+MAX_SIP_HEADER_BYTES = 16384
+MAX_SIP_CONTENT_LENGTH = 65536
+
+
+def _sanitize_device_id(device_id: Any) -> str:
+    """Sanitize device_id for safe usage in temporary filenames."""
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", str(device_id or ""))
+    return cleaned or "unknown"
+
 
 class AveSipSession(asyncio.DatagramProtocol):
     """SIP session and full-duplex RTP audio engine for AVE Video V44."""
@@ -47,10 +56,12 @@ class AveSipSession(asyncio.DatagramProtocol):
         local_host: str = "0.0.0.0",
         local_port: int = 5060,
         rtp_port: int = AUDIO_PORT,
+        remote_ip: Optional[str] = None,
     ) -> None:
         self.local_host = local_host
         self.local_port = local_port
         self.rtp_port = rtp_port
+        self.remote_ip: Optional[str] = remote_ip
 
         self._transport: Optional[asyncio.DatagramTransport] = None
         self._remote_rtp_addr: Optional[Tuple[str, int]] = None
@@ -277,6 +288,20 @@ class AveSipSession(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: Tuple[str, int]) -> None:
         """Handle incoming datagram: SIP message or RTP packet."""
+        if (
+            self.remote_ip
+            and self.remote_ip not in ("0.0.0.0", "127.0.0.1")
+            and isinstance(addr, tuple)
+            and len(addr) >= 1
+            and addr[0] not in (self.remote_ip, "127.0.0.1", "::1")
+        ):
+            _LOGGER.debug(
+                "Dropped UDP packet from unexpected source %s (expected %s)",
+                addr[0],
+                self.remote_ip,
+            )
+            return
+
         if len(data) >= 12 and data[0] == 0x80 and (data[1] & 0x7F) == 8:
             self.handle_rtp_packet(data)
         elif data.startswith((b"INVITE", b"SIP/2.0", b"INFO", b"BYE", b"ACK", b"OPTIONS")):
@@ -417,27 +442,29 @@ class CloudSipMediaSession:
 
     def __init__(
         self,
-        device_id: str,
-        sip_username: str,
-        sip_password: str,
-        target_sip_uri: str,
+        device_id: Any,
+        sip_username: str = "",
+        sip_password: str = "",
+        target_sip_uri: str = "",
         user_id: str = "34964",
         target_device_num: str = "1",
         sender_name: str = "Citofono",
         ffmpeg_binary: str = "ffmpeg",
         on_terminated: Optional[Callable[[], None]] = None,
         enable_audio: bool = True,
+        sip_config: Optional[Dict[str, Any]] = None,
     ) -> None:
-        self.device_id = str(device_id)
-        self.sip_username = str(sip_username)
-        self.sip_password = str(sip_password)
-        self.target_sip_uri = str(target_sip_uri)
-        self.user_id = str(user_id)
-        self.target_device_num = str(target_device_num)
-        self.sender_name = str(sender_name)
+        self.device_id = _sanitize_device_id(device_id)
+        self.sip_username = str(sip_username or "")
+        self.sip_password = str(sip_password or "")
+        self.target_sip_uri = str(target_sip_uri or "")
+        self.user_id = str(user_id or "34964")
+        self.target_device_num = str(target_device_num or "1")
+        self.sender_name = str(sender_name or "Citofono")
         self.ffmpeg_binary = ffmpeg_binary
         self.on_terminated = on_terminated
         self.enable_audio: bool = enable_audio
+        self.sip_config: Dict[str, Any] = sip_config or {}
 
         # Extract user & domain, e.g. "sip:2114136144349364224@eu.open-sips.gvs-icloud.com"
         clean = self.sip_username
@@ -628,6 +655,24 @@ class CloudSipMediaSession:
         match = re.search(r'realm=["\']?([^"\',]+)["\']?', auth_hdr)
         realm = f" realm={match.group(1)}" if match else ""
         return f"{msg_type} response: {start_line}{realm}"
+
+    def _is_trusted_udp_source(self, addr: Any) -> bool:
+        """Return True if UDP packet comes from loopback or negotiated remote host."""
+        if not addr or not isinstance(addr, tuple) or len(addr) < 1:
+            return False
+        src_ip = str(addr[0])
+        if src_ip in ("127.0.0.1", "::1", "0.0.0.0"):
+            return True
+        trusted = set()
+        if self._remote_ip:
+            trusted.add(str(self._remote_ip))
+        for key in ("server", "proxy", "domain"):
+            val = str(self.sip_config.get(key, "")).split(":")[0].strip()
+            if val:
+                trusted.add(val)
+        if not trusted:
+            return True
+        return src_ip in trusted
 
     def _run_stall_watchdog(self, loop_thread_id: int) -> None:
         """Daemon thread monitoring event loop heartbeat for stalls."""
@@ -1026,6 +1071,11 @@ class CloudSipMediaSession:
             if not chunk:
                 raise ConnectionResetError("SIP connection closed by remote server")
             self._rx_buf.extend(chunk)
+            if len(self._rx_buf) > MAX_SIP_HEADER_BYTES:
+                self._rx_buf.clear()
+                raise ValueError(
+                    f"SIP header exceeds maximum allowed size ({MAX_SIP_HEADER_BYTES} bytes)"
+                )
 
         idx = self._rx_buf.find(b"\r\n\r\n")
         header_bytes = bytes(self._rx_buf[:idx])
@@ -1041,6 +1091,9 @@ class CloudSipMediaSession:
                 headers[k.strip().lower()] = v.strip()
 
         content_len = int(headers.get("content-length", 0))
+        if content_len < 0 or content_len > MAX_SIP_CONTENT_LENGTH:
+            self._rx_buf.clear()
+            raise ValueError(f"Invalid or excessive SIP Content-Length: {content_len}")
         while len(self._rx_buf) < content_len:
             chunk = await self._reader.read(4096)
             if not chunk:
@@ -1075,6 +1128,9 @@ class CloudSipMediaSession:
                 pkt, addr = self._audio_sock.recvfrom(65535)
                 if not pkt:
                     break
+
+                if not self._is_trusted_udp_source(addr):
+                    continue
 
                 # Backwards-compatibility relay for legacy FFmpeg audio listener tests
                 if self._ffmpeg_audio_port:
@@ -1125,7 +1181,13 @@ class CloudSipMediaSession:
                     self._rx_last_seq = seq
 
                 # Symmetric RTP (RFC 4961) learning only after successful authentication
-                if addr and isinstance(addr, tuple) and len(addr) >= 2 and addr[0] not in ("127.0.0.1", "0.0.0.0"):
+                if (
+                    addr
+                    and isinstance(addr, tuple)
+                    and len(addr) >= 2
+                    and addr[0] not in ("127.0.0.1", "0.0.0.0")
+                    and (not self._remote_ip or addr[0] == self._remote_ip)
+                ):
                     self._remote_ip, self._remote_audio_port = addr[0], addr[1]
 
                 hdr_len = _rtp_header_length(rtp_pkt)
@@ -1373,7 +1435,9 @@ class CloudSipMediaSession:
             had_pkts = False
             try:
                 while self._video_sock:
-                    pkt, _ = self._video_sock.recvfrom(65535)
+                    pkt, addr = self._video_sock.recvfrom(65535)
+                    if not self._is_trusted_udp_source(addr):
+                        continue
                     if pkt:
                         had_pkts = True
                         video_rx_pkts += 1
@@ -1783,7 +1847,8 @@ class CloudSipMediaSession:
                 parsed_sdp.get("audio_payload_type"),
             )
 
-            self._sdp_path = f"/tmp/ave_video44_{self.device_id}_{uuid.uuid4().hex[:6]}.sdp"
+            safe_dev_id = _sanitize_device_id(self.device_id)
+            self._sdp_path = f"/tmp/ave_video44_{safe_dev_id}_{uuid.uuid4().hex[:6]}.sdp"
             sdp_content = self._generate_local_sdp(
                 ffmpeg_port=self._ffmpeg_port,
                 crypto_suite=parsed_sdp["crypto_suite"],

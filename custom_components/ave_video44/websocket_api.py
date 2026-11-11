@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import re
 import time
 from typing import Any, Dict, Optional
 import voluptuous as vol
@@ -13,6 +14,20 @@ from .const import DOMAIN
 from .coordinator import AveVideo44Coordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_AUDIO_TX_B64_LEN = 32768
+MAX_AUDIO_TX_PCM_BYTES = 24576
+MAX_AUDIO_TX_FPS = 150
+MAX_AUDIO_TX_SESSIONS = 32
+_RTSP_CRED_RE = re.compile(r"(rtsps?://)[^/@\s]+@")
+
+
+def _redact_rtsp_url(url: Optional[str]) -> Optional[str]:
+    """Mask embedded credentials in RTSP/RTSPS URLs before sending to browser."""
+    if not url or not isinstance(url, str):
+        return url
+    return _RTSP_CRED_RE.sub(r"\1***:***@", url)
+
 
 _AUDIO_TX_SESSIONS: Dict[Any, Dict[str, Any]] = {}
 
@@ -88,7 +103,9 @@ async def ws_call_control(
         await coordinator.async_unlock(device_id, lock_id=str(msg.get("lock_id", "1")))
     elif action == "monitor":
         rtsp_url = await coordinator.async_wake_camera(device_id)
-        connection.send_result(msg["id"], {"success": True, "rtsp_url": rtsp_url})
+        connection.send_result(
+            msg["id"], {"success": True, "rtsp_url": _redact_rtsp_url(rtsp_url)}
+        )
         return
 
     connection.send_result(msg["id"], {"success": True})
@@ -98,7 +115,7 @@ async def ws_call_control(
     vol.Required("type"): "ave_video44/audio_tx",
     vol.Optional("entry_id"): str,
     vol.Required("device_id"): vol.Any(int, str),
-    vol.Required("payload"): str,
+    vol.Required("payload"): vol.All(str, vol.Length(min=1, max=MAX_AUDIO_TX_B64_LEN)),
     vol.Optional("ack", default=False): vol.Any(bool, vol.Coerce(bool)),
 })
 @websocket_api.async_response
@@ -120,9 +137,35 @@ async def ws_audio_tx(
             _LOGGER.debug("audio_tx dropped: no active SIP session for device %s", device_id)
             return
 
-        pcm16_data = base64.b64decode(msg["payload"])
+        raw_payload = msg.get("payload", "")
+        if not isinstance(raw_payload, str) or len(raw_payload) > MAX_AUDIO_TX_B64_LEN:
+            raise websocket_api.WebSocketError(
+                "invalid_format", "Audio payload exceeds maximum allowed size"
+            )
+
+        pcm16_data = base64.b64decode(raw_payload)
+        if len(pcm16_data) > MAX_AUDIO_TX_PCM_BYTES:
+            raise websocket_api.WebSocketError(
+                "invalid_format", "Decoded audio frame exceeds maximum allowed size"
+            )
+
         now = time.monotonic()
         session_key = (id(connection), str(device_id))
+        if session_key not in _AUDIO_TX_SESSIONS:
+            stale = [
+                k
+                for k, v in _AUDIO_TX_SESSIONS.items()
+                if now - v.get("last_active", 0.0) > 30.0
+            ]
+            for k in stale:
+                _AUDIO_TX_SESSIONS.pop(k, None)
+            if len(_AUDIO_TX_SESSIONS) >= MAX_AUDIO_TX_SESSIONS:
+                oldest_key = min(
+                    _AUDIO_TX_SESSIONS.keys(),
+                    key=lambda k: _AUDIO_TX_SESSIONS[k].get("last_active", 0.0),
+                )
+                _AUDIO_TX_SESSIONS.pop(oldest_key, None)
+
         stats = _AUDIO_TX_SESSIONS.get(session_key)
         if not stats or (now - stats["last_active"] > 5.0):
             _LOGGER.debug(
@@ -136,15 +179,27 @@ async def ws_audio_tx(
                 "last_log": now,
                 "last_frames": 0,
                 "last_active": now,
+                "window_start": now,
+                "window_frames": 1,
             }
             _AUDIO_TX_SESSIONS[session_key] = stats
         else:
             stats["frames"] += 1
             stats["bytes"] += len(pcm16_data)
             stats["last_active"] = now
+            if now - stats.get("window_start", 0.0) >= 1.0:
+                stats["window_start"] = now
+                stats["window_frames"] = 1
+            else:
+                stats["window_frames"] = stats.get("window_frames", 0) + 1
+
             if now - stats["last_log"] >= 5.0:
                 elapsed = now - stats["last_log"]
-                rate = (stats["frames"] - stats["last_frames"]) / elapsed if elapsed > 0 else 0.0
+                rate = (
+                    (stats["frames"] - stats["last_frames"]) / elapsed
+                    if elapsed > 0
+                    else 0.0
+                )
                 _LOGGER.debug(
                     "audio_tx device=%s frames=%d bytes=%d rate=%.1f fps",
                     device_id,
@@ -155,10 +210,12 @@ async def ws_audio_tx(
                 stats["last_log"] = now
                 stats["last_frames"] = stats["frames"]
 
-        if len(_AUDIO_TX_SESSIONS) > 32:
-            stale = [k for k, v in _AUDIO_TX_SESSIONS.items() if now - v.get("last_active", 0.0) > 30.0]
-            for k in stale:
-                _AUDIO_TX_SESSIONS.pop(k, None)
+        if stats["window_frames"] > MAX_AUDIO_TX_FPS:
+            if msg.get("ack", False):
+                connection.send_error(
+                    msg["id"], "rate_limited", "Audio TX rate limit exceeded"
+                )
+            return
 
         if hasattr(session, "send_pcm16_frame"):
             session.send_pcm16_frame(pcm16_data)
